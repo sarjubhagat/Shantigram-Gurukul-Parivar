@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"c:\\\\projects\\\\serve\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object -ExpandProperty FullName | ForEach-Object { $_.Replace\\(\"c:\\\\projects\\\\serve\\\\\", \"\"\\) } | Sort-Object)",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"c:\\\\projects\\\\serve\\\\resources\\\\views\\\\admin\\\\modules\")",
+      "PowerShell(New-Item -ItemType Directory -Force -Path \"c:\\\\projects\\\\serve\\\\resources\\\\views\\\\admin\\\\auth\")",
+      "WebFetch(domain:shantigramgurukul.org)",
+      "WebFetch(domain:www.shantigramgurukul.org)",
+      "Bash(Get-ChildItem -Path \"c:\\\\projects\\\\serve\\\\resources\\\\views\\\\admin\" -Directory)",
+      "Bash(php artisan *)",
+      "PowerShell(cd c:\\\\projects\\\\serve; php artisan tinker --execute=\"App\\\\Models\\\\AccessCenter\\\\Role::whereNull\\('unique_key'\\)->get\\(\\)->each\\(function\\(\\\\$r\\){ \\\\$r->update\\(['unique_key' => App\\\\Models\\\\AccessCenter\\\\Role::generateUniqueKey\\(\\\\$r->name, \\\\$r->id\\)]\\); }\\); echo 'done';\")"
+    ]
+  }
+}

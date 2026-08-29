@@ -1,0 +1,407 @@
+================================================================================
+ICARD PRINT SYSTEM — IMPLEMENTATION REFERENCE
+Source project: gurukul-hostel (Laravel)
+Printer: Epson L805  ·  Tray: 210mm × 350mm  ·  Cards: 10 per sheet (5 rows × 2 cols)
+================================================================================
+
+Use this file as a spec when rebuilding the same IC card print system in another
+Laravel (or similar) project. Copy the architecture, not necessarily every table
+name. Adapt student/person data sources to the new system.
+
+--------------------------------------------------------------------------------
+1. WHAT THE SYSTEM DOES (USER FLOW)
+--------------------------------------------------------------------------------
+
+A. STUDENT PHOTO PIPELINE
+   1. Student uploads a raw photo from the student app / frontend.
+   2. Admin opens Student Photo module, sees:
+        - Current official photo (document_id = 62 / passport photo)
+        - Newly uploaded IC card photo
+   3. Admin clicks "Crop & Apply Photo":
+        - Cropper UI loads the uploaded photo
+        - Cropped JPEG is saved as the official student photo (doc 62)
+        - Temporary IC card upload is deleted
+
+B. GENERATE / PRINT ICARDS
+   1. Admin opens Generate ICard list (DataTable of students).
+   2. Filters: search, profile type, admission date range.
+   3. Selects up to 10 students (or fewer if start slot is not slot 1).
+   4. Chooses START ROW (1–5) and START COLUMN (Left/Right).
+      Why: if some cards on the physical tray were already printed / punched,
+      leave those slots blank and start from a later slot.
+   5. Print opens a dedicated print page (new tab):
+        - Front / Back toggle (print one side, flip tray, print other side)
+        - Preview zoom (does NOT use browser Ctrl+scroll, so other tabs stay 100%)
+        - Per-card edit modal (preview-only; not saved to DB)
+        - Calibration marks for aligning printer
+   6. Browser print dialog: custom paper 210×350 mm, margins None, scale 100%.
+
+C. SETTINGS
+   - Academic year text (shown vertically on front)
+   - Front/back background images per profile type (College / Job / Civil / Professional)
+   - Text color codes per profile type
+   - Tray calibration numbers (mm): margins, print correction, page shift
+   - Default start row / start column
+
+--------------------------------------------------------------------------------
+2. PHYSICAL TRAY MATH (MOST IMPORTANT)
+--------------------------------------------------------------------------------
+
+Epson L805 ID card tray:
+
+  Tray size:     210mm wide × 350mm high
+  Card size:     86mm × 54.3mm   (credit-card-ish; slightly taller than 54mm)
+  Grid:          5 rows × 2 columns = 10 slots
+  Target margin: top 10mm, left 15mm
+  Gap X (cols):  9.3mm
+  Gap Y (rows):  5.1mm
+
+CSS variables used on print page:
+
+  --tray-w / --tray-h
+  --card-w / --card-h
+  --tray-target-margin-top / --tray-target-margin-left   (physical target)
+  --tray-print-cal-top / --tray-print-cal-left           (printer correction)
+  --tray-page-shift-top / --tray-page-shift-left         (whole-sheet driver shift)
+
+  Effective margin:
+    --tray-margin-top  = target_top  + cal_top
+    --tray-margin-left = target_left + cal_left
+
+  Column 2 left = margin_left + card_w + gap_x
+  Row n top     = margin_top + (n-1) * (card_h + gap_y)
+
+Slot numbering (1-based, left-to-right, top-to-bottom):
+
+  Slot 1  = Row1 Col1 (left)
+  Slot 2  = Row1 Col2 (right)
+  Slot 3  = Row2 Col1
+  ...
+  Slot 10 = Row5 Col2
+
+Start-slot offset (0-based index into 10 slots):
+
+  offset = (start_row - 1) * 2 + (start_column - 1)
+  available_slots = 10 - offset
+
+  Example: start row 2, column Left → offset 2 → slots 1–2 blank, students fill 3–10.
+  Max selectable students = available_slots.
+
+Map students into a 10-element array with nulls for empty slots.
+Print view always renders 10 .card-slot elements so positions stay fixed.
+
+Printer browser settings (REQUIRED or cards will shift / shrink):
+  - Paper size: Custom 210mm × 350mm  (NOT A4)
+  - Margins: None
+  - Scale: 100%  (disable Fit to Page / Shrink to Fit)
+  - Background graphics: ON  (so card images print)
+  - Color: Exact  (-webkit-print-color-adjust: exact)
+
+Calibration workflow:
+  1. Print with "Calibration Marks" ON (crosshairs at 0,0 and slot1/slot2).
+  2. If cards print too HIGH  → increase cal_top  (e.g. +2)
+  3. If cards print too FAR RIGHT → decrease cal_left (e.g. -3.5)
+  4. If whole sheet is offset by printer driver → use page_shift_top / page_shift_left
+  Current production defaults (Epson L805 in this project):
+    margin_top 10, margin_left 15, cal_top +2, cal_left -3.5, page_shift 0/0
+
+Print front first, physically flip the tray, switch UI to Back, print again.
+
+--------------------------------------------------------------------------------
+3. FILE MAP (COPY THESE ROLES)
+--------------------------------------------------------------------------------
+
+CONTROLLERS
+  app/Http/Controllers/Adminpanel/IcardGeneratorController.php
+      index()          list page
+      get_data()       DataTable JSON
+      settings()       backgrounds, colors, tray
+      saveSettings()   AJAX save
+      printCards()     builds card data + slots, returns print view
+
+  app/Http/Controllers/Adminpanel/StudentPhotoController.php
+      list of students with official photo vs uploaded icard photo
+      getIcardImage()  returns base64 of uploaded photo for cropper
+      applyPhoto()     cropped image → official photo, delete upload
+
+  app/Http/Controllers/Front/IcardPhotoController.php
+      student uploads icard_photo (jpeg/png, max 5MB)
+
+  app/Http/Controllers/HomeController.php → icardPrint()
+      DEMO/prototype page with dummy students (icard.icard blade)
+      Real production print is icard-print via IcardGeneratorController
+
+SERVICES
+  app/Services/IcardPrintService.php
+      buildCardsForGurukulIds(ids, profileTypeMap)
+      buildCardData(student)
+      Resolves: name, photo, QR, profile, contacts, address, org, backgrounds, colors
+      Max 10 IDs.
+
+  app/Services/IcardTraySettings.php
+      Stored in general_variables table (key/value)
+      get / save / resolveForPrint / slotOffset / availableSlots / mapStudentsToSlots
+
+  app/Services/StudentIcardPhotoService.php
+      uploadForStudent()     S3 path: icard-photo/{userId}/icard_{ts}.{ext}
+      applyCroppedToStudentPhoto()  writes Docs/{userId}/62PP{ts}.jpeg as document_id 62
+
+MODELS
+  app/Models/IcardImage.php         table icard_images
+  app/Models/StudentIcardPhoto.php  table student_icard_photos
+  GurukulStudent::getStudentListForIcardGenerator()
+  QrToken used for QR payload
+
+VIEWS
+  resources/views/adminpanel/icardGenerator/icard-generator.blade.php
+  resources/views/adminpanel/icardGenerator/icard-settings.blade.php
+  resources/views/adminpanel/studentPhoto/student-photo.blade.php
+  resources/views/adminpanel/studentPhoto/icard-crop-modal.blade.php
+  resources/views/frontend/icard-photo.blade.php
+  resources/views/icard/icard-print.blade.php      ← REAL print page
+  resources/views/icard/partials/print-styles.blade.php
+  resources/views/icard/icard.blade.php            ← early demo page
+
+JS
+  public/panel/modules/icardGenerator/icard-generator-datatable-ajax.js
+
+ASSETS
+  public/assets/icard/01.jpeg   fallback front
+  public/assets/icard/02.jpeg   fallback back
+
+PERMISSIONS
+  icard-generator-list   view list + print
+  icard-generator-edit   settings
+  student-photo-edit     crop/apply
+
+ROUTES
+  GET  /adminpanel/icard-generator
+  POST /adminpanel/icard-generator/get-data   (standard module datatable)
+  GET  /adminpanel/icard-generator/settings
+  POST /adminpanel/icard-generator/save-settings
+  GET  /adminpanel/icard-generator/print?gurukul_ids[]=&profile_types[ID]=&start_row=&start_column=
+  GET  /icard-photo  + POST store   (student frontend)
+  GET  /adminpanel/student-photo/icard-image
+  POST /adminpanel/student-photo/apply-photo
+  GET  /icard-print   demo only
+
+--------------------------------------------------------------------------------
+4. DATABASE
+--------------------------------------------------------------------------------
+
+TABLE: icard_images
+  id
+  image_key     unique string, e.g. C_FRONT, C_BACK, W_FRONT, ...
+  image_path    encrypted S3 key
+  color_codes   JSON (text colors for that profile; stored on *_FRONT key)
+  chrPublish    Y/N
+  timestamps
+
+IMAGE KEYS (profile type → backgrounds):
+  C = College        C_FRONT / C_BACK
+  W = Job/Business   W_FRONT / W_BACK
+  S = Civil Service  S_FRONT / S_BACK
+  P = Professional   P_FRONT / P_BACK
+
+Color codes live on the FRONT key only and apply to both sides.
+COLOR_CODE_FIELDS:
+  front_suid_value, front_year_value, front_name_value
+  back_profile_label, back_profile_value
+  back_mobile_label, back_mobile_value
+  back_contact_label, back_contact_value
+  back_address_label, back_address_value
+  back_org_label, back_org_value
+
+Default colors:
+  Front SUID/Year: #FFFFFF
+  Everything else: #2D1A0E
+
+TABLE: student_icard_photos   (temporary upload before admin crop)
+  id, user_id, photo_path (encrypted), chrPublish, chrDelete, timestamps
+
+TABLE: application_documents  (existing; official photo)
+  document_id = 62  = passport / IC card photo used on print
+
+TABLE: qr_tokens
+  unique_id  = student ID (gurukul_id)
+  qr_token   = opaque 10-char token printed as QR
+  name, person_type, is_active
+  If missing at print time, create one:
+    qr_token = substr(base64(hmac_sha256(studentId, APP_KEY)), 0, 10)
+
+TABLE: general_variables  (key/value settings)
+  icard_academic_year
+  icard_tray_margin_top
+  icard_tray_margin_left
+  icard_tray_cal_top
+  icard_tray_cal_left
+  icard_tray_page_shift_top
+  icard_tray_page_shift_left
+  icard_tray_start_row
+  icard_tray_start_column
+
+S3 PATHS
+  icard-images/{KEY}_{timestamp}.jpeg|png     background art
+  icard-photo/{userId}/icard_{timestamp}.ext  student upload
+  Docs/{userId}/62PP{timestamp}.jpeg          official cropped photo
+
+Max background upload: 30 MB. Allowed: jpg/jpeg/png.
+
+--------------------------------------------------------------------------------
+5. CARD DATA SHAPE (what print view needs)
+--------------------------------------------------------------------------------
+
+Each student card array:
+
+  gurukul_id          string (SUID)
+  name                UPPERCASE Last First Middle
+  academic_year       from general_variables, fallback student session
+  photo_url           signed S3 URL of document_id 62
+  qr_code             data:image/svg+xml;base64,...  (simple-qrcode, size 400, EC H, margin 1)
+  profile_type        C|W|S|P
+  profile_type_label  "College Student" etc.
+  mobile              student whatsapp
+  contact_label       "Parents No." or "Family Member" (if P)
+  contact_number      father then guardian mobile
+  address             village, district, state  (skip empty / "other" / duplicates)
+  org_label           College | Institute | Company
+  org_name            college short_name / institute_name / company_name
+  front_bg / back_bg  S3 URLs (fallback public/assets/icard/01.jpeg and 02.jpeg)
+  front_bg_key / back_bg_key
+  color_codes         assoc array of hex colors
+
+Profile type resolution order:
+  1. Override from print form (profile_types[gurukul_id]) — from DataTable checkbox
+  2. profileTracking for current admin session
+  3. user.profile_type
+  4. default C
+
+QR: print the stored qr_token, NOT the gurukul_id. Same token used by attendance
+and bhojan scanners.
+
+--------------------------------------------------------------------------------
+6. FRONT / BACK LAYOUT (CSS OVERLAYS ON BACKGROUND IMAGE)
+--------------------------------------------------------------------------------
+
+Each slot:
+  .card-slot
+    .card-face.card-front
+      img.card-bg
+      .card-overlay
+        .f-suid-v     vertical SUID, left edge, rotated 180deg
+        .f-year-v     vertical year, right edge
+        .f-photo      23mm × 28mm, left 48mm, top 14mm
+        .f-qr         28mm × 28mm, left 10mm, top 14mm, mix-blend-mode: multiply
+        .f-name-block bottom center
+    .card-face.card-back
+      img.card-bg
+      .card-overlay
+        row1: Profile | Mobile No.
+        row2: Contact label+number | Address
+        row3: Org label + org name  (hidden if empty)
+
+Side toggle:
+  .print-page.side-front hides .card-back
+  .print-page.side-back  hides .card-front
+
+Do NOT put a border/outline/box-shadow on slots for print — they show as lines.
+
+Fonts: Noto Sans Gujarati / Nirmala UI / Arial (Gujarati names).
+
+--------------------------------------------------------------------------------
+7. PRINT CSS TRICKS THAT MATTER
+--------------------------------------------------------------------------------
+
+@page { size: 210mm 350mm; margin: 0; }
+
+On screen: wrap tray in .screen-scale-inner with --preview-scale (default 1.4).
+  inner width/height = tray * scale
+  .print-page { transform: scale(var(--preview-scale)); transform-origin: top left; }
+
+On print (@media print):
+  html/body = exactly tray size, overflow hidden
+  hide .ui-wrapper, .print-hint, .no-print, edit button, modal
+  RESET transform to none (preview zoom must not affect printed size)
+  .print-page { position: fixed; top: page_shift_top; left: page_shift_left; }
+  -webkit-print-color-adjust: exact;
+
+Intercept Ctrl+wheel / Ctrl+/- / Ctrl+0 on the print page and apply preview
+zoom instead of browser zoom. Browser zoom would also shrink other admin tabs.
+
+beforeprint: force --preview-scale 1
+afterprint: restore preview scale
+
+Per-card EDIT is preview-only (JS writes into .js-f-suid etc.). QR is never edited.
+
+--------------------------------------------------------------------------------
+8. LIST PAGE + PRINT FORM
+--------------------------------------------------------------------------------
+
+DataTable server-side, checkboxes with:
+  value = gurukul_id
+  data-name
+  data-profile-type
+
+Selection is kept in JS object across pages.
+Max selectable = min(10, availableSlots from start row/col).
+Disable extra checkboxes when full.
+
+Hidden GET form target=_blank:
+  gurukul_ids[]
+  profile_types[GURUKUL_ID]
+  start_row
+  start_column
+
+Server validates:
+  at least 1 student
+  max 10
+  count <= availableSlots for that start position
+  students exist
+
+--------------------------------------------------------------------------------
+9. HOW TO REBUILD IN ANOTHER SYSTEM (CHECKLIST)
+--------------------------------------------------------------------------------
+
+[ ] Measure your printer tray. If not Epson L805, replace mm constants.
+[ ] Create icard_images + student_icard_photos (or skip photo pipeline if not needed).
+[ ] Store tray settings (key/value is enough).
+[ ] Build IcardPrintService that returns the card data shape above from YOUR
+    student tables (name, photo URL, QR, phone, address, org).
+[ ] Copy print-styles.blade.php and icard-print.blade.php almost as-is.
+    Change field mapping, not the tray CSS, unless tray is different.
+[ ] Copy slot mapping from IcardTraySettings (offset formula).
+[ ] Settings page: upload 2 images per person-type + color pickers + tray mm.
+[ ] List page: select people, start slot, open print in new tab.
+[ ] QR: store opaque token, generate SVG data-URI at print time
+    (simplesoftwareio/simple-qrcode).
+[ ] Print test: custom paper, no margins, 100% scale, background graphics ON.
+[ ] Use calibration marks, then save cal_top / cal_left.
+[ ] Optional: student upload + admin crop into official photo.
+
+If the new system has only one card design, you can ignore profile types and
+use a single FRONT/BACK image pair.
+
+If the new system prints A4 (not a 10-card tray), keep the card overlay CSS
+but replace the 10-slot absolute grid with a simple 1-up or 2-up A4 layout.
+The overlay positions (photo, QR, name) are independent of tray math.
+
+--------------------------------------------------------------------------------
+10. KNOWN GOTCHAS
+--------------------------------------------------------------------------------
+
+- Browser Fit-to-Page shrinks the tray → cards miss the plastic slots.
+- Browser default margins add extra offset → use cal_left/cal_top, not guesswork.
+- Printing from a zoomed Chrome tab (Ctrl+scroll) also scales output → intercept
+  wheel/keyboard zoom on the print page.
+- Background images must be publicly fetchable or signed S3 URLs that last
+  through print (signed URL expiry).
+- QR mix-blend-mode: multiply makes white QR background disappear on light art.
+- Encrypted S3 paths: always decrypt before Storage::disk('s3') and encrypt
+  before save (MyLibrary::getEncryptedString / getDecryptedString).
+- Color JSON: sanitize to #RRGGBB; empty string = CSS default.
+- Do not save print-preview edits back to student records (by design).
+- Max 10 cards because the physical tray has 10 slots.
+
+--------------------------------------------------------------------------------
+END
+--------------------------------------------------------------------------------
