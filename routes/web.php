@@ -8,11 +8,22 @@ use App\Http\Controllers\Admin\ContentLibrary\PdfLibraryController;
 use App\Http\Controllers\Admin\ContentLibrary\VideoLibraryController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\ProfileController;
+use App\Http\Controllers\Member\SelfServiceController;
 use App\Services\ModuleResolver;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', fn() => view('welcome'));
+Route::get('/', fn() => redirect('/member-update'));
+
+Route::prefix('member-update')->name('member-update.')->group(function () {
+    Route::get('/', [SelfServiceController::class, 'index'])->name('index');
+    Route::post('/send-otp', [SelfServiceController::class, 'sendOtp'])->name('send_otp');
+    Route::post('/verify-otp', [SelfServiceController::class, 'verifyOtp'])->name('verify_otp');
+    Route::post('/select-member', [SelfServiceController::class, 'selectMember'])->name('select_member');
+    Route::get('/profile', [SelfServiceController::class, 'profile'])->name('profile');
+    Route::post('/submit', [SelfServiceController::class, 'submit'])->name('submit');
+    Route::post('/logout', [SelfServiceController::class, 'logout'])->name('logout');
+});
 
 // Auth routes
 Route::middleware('guest')->prefix('admin')->group(function () {
@@ -130,12 +141,20 @@ Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () 
                     Route::post('/generate-aadhaar', [$ctrlClass, 'generateAadhaar'])
                         ->name('generate_aadhaar')
                         ->middleware($list_perm);
+                    Route::get('/check-phone', [$ctrlClass, 'checkPhone'])
+                        ->name('check_phone')
+                        ->middleware($list_perm);
                 }
 
                 if (str_contains($ctrlClass, 'IcardPrintController')) {
                     Route::get('/settings', [$ctrlClass, 'settings'])->name('settings')->middleware($edit_perm);
                     Route::post('/save-settings', [$ctrlClass, 'saveSettings'])->name('save_settings')->middleware($edit_perm);
                     Route::get('/print', [$ctrlClass, 'printCards'])->name('print')->middleware($list_perm);
+                }
+
+                if (str_contains($ctrlClass, 'DataUpdateController')) {
+                    Route::get('/{id}/show', [$ctrlClass, 'show'])->name('show')->middleware($list_perm);
+                    Route::post('/{id}/review', [$ctrlClass, 'review'])->name('review')->middleware($edit_perm);
                 }
         
             });

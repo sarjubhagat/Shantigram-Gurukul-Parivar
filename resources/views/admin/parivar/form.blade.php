@@ -35,6 +35,7 @@
      data-update-url="{{ $isEdit ? route('admin.parivar.update', $member->id) : '' }}"
      data-delete-url="{{ route('admin.parivar.delete') }}"
      data-generate-aadhaar-url="{{ route('admin.parivar.generate_aadhaar') }}"
+     data-check-phone-url="{{ route('admin.parivar.check_phone') }}"
      data-edit-base="{{ url('/admin/parivar') }}">
 
     <div class="row g-4 align-items-start">
@@ -170,6 +171,12 @@
                                 <label class="form-label">Grandfather name</label>
                                 <input type="text" name="en_grandfather_name" class="form-control" value="{{ $old('en_grandfather_name') }}" placeholder="Grandfather">
                             </div>
+                            <div class="col-12">
+                                <label class="form-label">Display name <span class="pv-sec-note">used on I-card / print</span></label>
+                                <input type="text" name="display_name" class="form-control" value="{{ $old('display_name') }}" placeholder="e.g. PATEL RAJESH RAMESH BHAI">
+                                <div class="form-text">This exact name is printed on I-cards. Leave blank to auto-build from English name.</div>
+                                <div class="invalid-feedback" data-err="display_name"></div>
+                            </div>
                         </div>
 
                         <div class="pv-sec-label">Gujarati name <span class="pv-sec-note">ગુજરાતી</span></div>
@@ -260,8 +267,9 @@
                                             <option value="{{ $code }}" @selected($old('c_code_1', '+91') === $code)>{{ $code }}</option>
                                         @endforeach
                                     </select>
-                                    <input type="text" name="phone_1" class="form-control" value="{{ $old('phone_1') }}" placeholder="Phone number" maxlength="20">
+                                    <input type="text" name="phone_1" id="phone_1" class="form-control" value="{{ $old('phone_1') }}" placeholder="Phone number" maxlength="20" data-phone-check="1">
                                 </div>
+                                <div class="pv-phone-matches" id="phone1Matches" hidden></div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Secondary phone</label>
@@ -272,8 +280,9 @@
                                             <option value="{{ $code }}" @selected($old('c_code_2') === $code)>{{ $code }}</option>
                                         @endforeach
                                     </select>
-                                    <input type="text" name="phone_2" class="form-control" value="{{ $old('phone_2') }}" placeholder="Optional" maxlength="20">
+                                    <input type="text" name="phone_2" id="phone_2" class="form-control" value="{{ $old('phone_2') }}" placeholder="Optional" maxlength="20" data-phone-check="1">
                                 </div>
+                                <div class="pv-phone-matches" id="phone2Matches" hidden></div>
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Native place</label>
@@ -723,6 +732,36 @@
 .pv-item-sub { font-size: .75rem; color: var(--text-muted); margin-top: .1rem; }
 .pv-item-actions { display: flex; gap: .3rem; flex-shrink: 0; }
 .pv-empty { text-align: center; color: var(--text-muted); font-size: .84rem; padding: .9rem; }
+.pv-phone-matches {
+    margin-top: .45rem;
+    border: 1.5px solid rgba(139,26,26,.18);
+    border-radius: var(--r-sm);
+    background: #fff8f8;
+    overflow: hidden;
+}
+.pv-phone-matches-title {
+    font-size: .72rem;
+    font-weight: 700;
+    color: var(--primary);
+    padding: .4rem .65rem .2rem;
+}
+.pv-phone-match {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .6rem;
+    width: 100%;
+    border: 0;
+    border-top: 1px solid var(--border-light);
+    background: transparent;
+    text-align: left;
+    padding: .5rem .65rem;
+    cursor: pointer;
+}
+.pv-phone-match:hover { background: rgba(139,26,26,.06); }
+.pv-phone-match-name { font-size: .82rem; font-weight: 700; color: var(--text); }
+.pv-phone-match-meta { font-size: .72rem; color: var(--text-muted); }
+.pv-phone-match i { color: var(--primary); font-size: .85rem; }
 .pv-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .pv-chip {
     display: inline-flex; align-items: center; gap: .3rem;
@@ -755,6 +794,7 @@
     var updateUrl   = $app.data('update-url');
     var deleteUrl   = $app.data('delete-url');
     var genAadhaarUrl = $app.data('generate-aadhaar-url');
+    var checkPhoneUrl = $app.data('check-phone-url');
     var editBase    = $app.data('edit-base');
     var currentTab  = $app.data('tab') || 'personal';
 
@@ -963,6 +1003,58 @@
             },
             complete: function () { $btn.prop('disabled', false); }
         });
+    });
+
+    function renderPhoneMatches($box, matches) {
+        if (!matches || !matches.length) {
+            $box.attr('hidden', true).empty();
+            return;
+        }
+        var html = '<div class="pv-phone-matches-title">Already registered with this number</div>';
+        matches.forEach(function (m) {
+            html += '<button type="button" class="pv-phone-match" data-url="' + escAttr(m.edit_url) + '">'
+                + '<span><div class="pv-phone-match-name">' + esc(m.full_name || 'Member') + '</div>'
+                + '<div class="pv-phone-match-meta">#' + esc(String(m.unique_id)) + (m.phone ? ' · ' + esc(m.phone) : '') + '</div></span>'
+                + '<i class="bi bi-box-arrow-up-right"></i></button>';
+        });
+        $box.html(html).removeAttr('hidden');
+    }
+
+    function esc(s) {
+        return String(s || '').replace(/[&<>"']/g, function (c) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+        });
+    }
+    function escAttr(s) {
+        return esc(s).replace(/`/g, '');
+    }
+
+    $('[data-phone-check]').on('blur', function () {
+        var $input = $(this);
+        var phone = String($input.val() || '').replace(/\D+/g, '');
+        var $box = $input.closest('.col-md-6').find('.pv-phone-matches');
+
+        if (phone.length < 6) {
+            renderPhoneMatches($box, []);
+            return;
+        }
+
+        $.ajax({
+            url: checkPhoneUrl,
+            type: 'GET',
+            data: { phone: phone, except_id: memberId || '' },
+            success: function (r) {
+                renderPhoneMatches($box, (r && r.matches) ? r.matches : []);
+            },
+            error: function () {
+                renderPhoneMatches($box, []);
+            }
+        });
+    });
+
+    $(document).on('click', '.pv-phone-match', function () {
+        var url = $(this).data('url');
+        if (url) window.location.href = url;
     });
 
     // ── Business ──────────────────────────────────────────

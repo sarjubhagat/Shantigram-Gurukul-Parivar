@@ -6,8 +6,46 @@ return [
 
     'photo' => [
         'folder'         => env('PARIVAR_PHOTO_R2_FOLDER', 'parivar-photos'),
-        'max_kb'         => (int) env('PARIVAR_PHOTO_MAX_KB', 2048),
+        'update_folder'  => env('PARIVAR_UPDATE_PHOTO_R2_FOLDER', 'parivar-update-photos'),
+        'max_kb'         => (int) env('PARIVAR_PHOTO_MAX_KB', 4096),
         'signed_url_ttl' => (int) env('PARIVAR_PHOTO_SIGNED_TTL', 120),
+    ],
+
+    'otp' => [
+        'test_mode'  => (bool) env('PARIVAR_OTP_TEST_MODE', false),
+        'test_otp'   => env('PARIVAR_OTP_TEST_CODE', '12345'),
+        'send_url'   => env('PARIVAR_OTP_SEND_URL', 'https://hostel.shantigramgurukul.org/api/message/send-otp'),
+        'hash'       => env('PARIVAR_OTP_HASH', 'DKDKJIEJGOD'),
+        'ttl_minutes'=> (int) env('PARIVAR_OTP_TTL', 10),
+    ],
+
+    'self_service' => [
+        // English first / last / middle are locked on the form (internal use).
+        // Members request name changes via member_note textarea.
+        'locked_name_fields' => [
+            'en_last_name',
+            'en_first_name',
+            'en_middle_name',
+        ],
+        'editable_fields' => [
+            'display_name',
+            'en_grandfather_name',
+            'gu_first_name',
+            'gu_last_name',
+            'gu_middle_name',
+            'gu_grandfather_name',
+            'aadhaar_number',
+            'marital_status',
+            'date_of_birth',
+            'gender',
+            'c_code_1',
+            'phone_1',
+            'c_code_2',
+            'phone_2',
+            'native_place',
+            'current_address',
+            'is_gurukul_student',
+        ],
     ],
 
     'genders' => [

@@ -99,6 +99,11 @@ class IcardPrintService
 
     private function cardName(PersonalInfo $member): string
     {
+        $display = trim((string) $member->display_name);
+        if ($display !== '') {
+            return mb_strtoupper($display);
+        }
+
         $middle = trim((string) $member->en_middle_name);
         $name   = mb_strtoupper(trim(collect([
             $member->en_last_name,
@@ -107,7 +112,7 @@ class IcardPrintService
         ])->filter()->implode(' ')));
 
         if ($middle !== '' && ! preg_match('/\bBHAI\s*$/iu', $name)) {
-            $name .= 'BHAI';
+            $name .= ' BHAI';
         }
 
         return $name;

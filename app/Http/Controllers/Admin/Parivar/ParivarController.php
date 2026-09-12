@@ -154,6 +154,39 @@ class ParivarController extends AdminController
         ]);
     }
 
+    public function checkPhone(Request $request): JsonResponse
+    {
+        $phone = preg_replace('/\D+/', '', (string) $request->input('phone', ''));
+
+        if (strlen($phone) < 6) {
+            return response()->json(['success' => true, 'matches' => []]);
+        }
+
+        $exceptId = $request->integer('except_id') ?: null;
+
+        $matches = PersonalInfo::query()
+            ->when($exceptId, fn ($q) => $q->where('id', '!=', $exceptId))
+            ->where(function ($q) use ($phone) {
+                $q->where('phone_1', $phone)
+                    ->orWhere('phone_2', $phone)
+                    ->orWhereRaw("regexp_replace(coalesce(phone_1, ''), '[^0-9]', '', 'g') = ?", [$phone])
+                    ->orWhereRaw("regexp_replace(coalesce(phone_2, ''), '[^0-9]', '', 'g') = ?", [$phone]);
+            })
+            ->orderBy('unique_id')
+            ->limit(8)
+            ->get()
+            ->map(fn (PersonalInfo $p) => [
+                'id'        => $p->id,
+                'unique_id' => $p->unique_id,
+                'full_name' => $p->display_name ?: $p->englishFullName(),
+                'phone'     => $p->primaryPhone(),
+                'edit_url'  => url('/admin/parivar/' . $p->id . '/edit'),
+            ])
+            ->values();
+
+        return response()->json(['success' => true, 'matches' => $matches]);
+    }
+
     public function update(Request $request, int $id): JsonResponse
     {
         $member  = PersonalInfo::findOrFail($id);
@@ -203,7 +236,7 @@ class ParivarController extends AdminController
     private function deleteMembers(array $ids): int
     {
         $rows = PersonalInfo::whereIn('id', $ids)->get();
-        $rows->each->delete();
+        $rows->each->forceDelete();
 
         return $rows->count();
     }
@@ -211,14 +244,14 @@ class ParivarController extends AdminController
     private function deleteGurukulRows(array $ids): int
     {
         $rows = GurukulInfo::whereIn('id', $ids)->get();
-        $rows->each->delete();
+        $rows->each->forceDelete();
 
         return $rows->count();
     }
 
     public function DeleteSingleRecord(int $id): JsonResponse
     {
-        PersonalInfo::findOrFail($id)->delete();
+        PersonalInfo::findOrFail($id)->forceDelete();
 
         return response()->json(['success' => true, 'message' => 'Member deleted.']);
     }
@@ -237,6 +270,7 @@ class ParivarController extends AdminController
             'en_last_name'        => 'required|string|max:100',
             'en_middle_name'      => 'nullable|string|max:100',
             'en_grandfather_name' => 'nullable|string|max:100',
+            'display_name'        => 'nullable|string|max:200',
             'gu_first_name'       => 'nullable|string|max:100',
             'gu_last_name'        => 'nullable|string|max:100',
             'gu_middle_name'      => 'nullable|string|max:100',

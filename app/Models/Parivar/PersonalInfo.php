@@ -21,6 +21,7 @@ class PersonalInfo extends Model
         'en_last_name',
         'en_middle_name',
         'en_grandfather_name',
+        'display_name',
         'gu_first_name',
         'gu_last_name',
         'gu_middle_name',
@@ -58,12 +59,31 @@ class PersonalInfo extends Model
         });
 
         static::deleting(function (self $person) {
+            $isForce = method_exists($person, 'isForceDeleting') && $person->isForceDeleting();
+
             $person->deletePhotoFromStorage();
-            $person->businesses()->get()->each->delete();
-            $person->gurukulRecords()->get()->each(function (GurukulInfo $record) {
-                $record->connectedSaints()->delete();
-                $record->delete();
+
+            $person->allBusinesses()->get()->each(function (BusinessInfo $b) use ($isForce) {
+                if ($isForce) {
+                    $b->forceDelete();
+                } else {
+                    $b->delete();
+                }
             });
+
+            $person->allGurukulRecords()->get()->each(function (GurukulInfo $record) use ($isForce) {
+                $record->connectedSaints()->delete();
+                if ($isForce) {
+                    $record->forceDelete();
+                } else {
+                    $record->delete();
+                }
+            });
+
+            if ($isForce) {
+                $person->qrToken()->delete();
+                $person->dataUpdates()->delete();
+            }
         });
     }
 
@@ -80,9 +100,29 @@ class PersonalInfo extends Model
         return $this->hasMany(BusinessInfo::class, 'unique_id', 'unique_id');
     }
 
+    public function allBusinesses(): HasMany
+    {
+        return $this->hasMany(BusinessInfo::class, 'unique_id', 'unique_id')->withTrashed();
+    }
+
     public function gurukulRecords(): HasMany
     {
         return $this->hasMany(GurukulInfo::class, 'unique_id', 'unique_id');
+    }
+
+    public function allGurukulRecords(): HasMany
+    {
+        return $this->hasMany(GurukulInfo::class, 'unique_id', 'unique_id')->withTrashed();
+    }
+
+    public function qrToken(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(IcardQrToken::class, 'unique_id', 'unique_id');
+    }
+
+    public function dataUpdates(): HasMany
+    {
+        return $this->hasMany(DataUpdate::class, 'personal_info_id', 'id');
     }
 
     public function englishFullName(): string
@@ -208,6 +248,7 @@ class PersonalInfo extends Model
             'en_last_name'         => $this->en_last_name,
             'en_middle_name'       => $this->en_middle_name,
             'en_grandfather_name'  => $this->en_grandfather_name,
+            'display_name'         => $this->display_name,
             'gu_first_name'        => $this->gu_first_name,
             'gu_last_name'         => $this->gu_last_name,
             'gu_middle_name'       => $this->gu_middle_name,
