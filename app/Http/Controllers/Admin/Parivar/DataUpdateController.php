@@ -175,6 +175,11 @@ class DataUpdateController extends AdminController
         return response()->json(['success' => false, 'message' => 'Not used.'], 501);
     }
 
+    public function update(Request $request, int $id): JsonResponse
+    {
+        return response()->json(['success' => false, 'message' => 'Use the review action instead.'], 501);
+    }
+
     public function AddEditAction(int $id = null)
     {
         return redirect()->to(url('/admin/data-updates'));
