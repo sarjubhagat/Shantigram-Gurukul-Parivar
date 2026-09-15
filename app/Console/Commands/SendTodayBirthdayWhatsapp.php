@@ -72,13 +72,6 @@ class SendTodayBirthdayWhatsapp extends Command
             }
         }
 
-        Log::info('Parivar birthday WhatsApp finished', [
-            'date'       => $date->toDateString(),
-            'members'    => $members->count(),
-            'sent'       => $ok,
-            'failed'     => $fail,
-            'recipients' => $recipients->all(),
-        ]);
 
         return $fail > 0 ? self::FAILURE : self::SUCCESS;
     }
