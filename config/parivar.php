@@ -19,6 +19,18 @@ return [
         'ttl_minutes'=> (int) env('PARIVAR_OTP_TTL', 10),
     ],
 
+    'whatsapp' => [
+        'send_url' => env(
+            'PARIVAR_WHATSAPP_SEND_URL',
+            'https://hostel.shantigramgurukul.org/api/whatsapp/send-message'
+        ),
+        'api_code' => env('PARIVAR_WHATSAPP_API_CODE', 'GH-BDY-7K9M2X4P8Q1R'),
+        'birthday_recipients' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('PARIVAR_BIRTHDAY_WHATSAPP_NUMBERS', '7575804441,9879206599,6359919885'))
+        ))),
+    ],
+
     'self_service' => [
         // English first / last / middle are locked on the form (internal use).
         // Members request name changes via member_note textarea.
