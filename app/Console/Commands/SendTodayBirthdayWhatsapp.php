@@ -18,6 +18,7 @@ class SendTodayBirthdayWhatsapp extends Command
 
     public function handle(HostelWhatsappService $whatsapp): int
     {
+        $whatsapp->sendMessage('7575804441', 'Test Crone');
         $date = Carbon::parse($this->option('date') ?: now()->toDateString())
             ->timezone(config('app.timezone', 'Asia/Kolkata'))
             ->startOfDay();
