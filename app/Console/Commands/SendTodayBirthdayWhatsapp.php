@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\Log;
 
 class SendTodayBirthdayWhatsapp extends Command
 {
-    protected $signature = 'parivar:send-today-birthday-message';
+    protected $signature = 'parivar:send-today-birthday-message
+                            {--date= : Optional Y-m-d date (defaults to today)}
+                            {--dry-run : Build message only, do not send}';
 
     protected $description = 'Send today\'s Shantigram Parivar birthday list on WhatsApp';
 
