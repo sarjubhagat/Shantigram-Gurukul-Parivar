@@ -24,13 +24,60 @@ class ParivarController extends AdminController
 
     public function get_data(): JsonResponse
     {
-        $members = PersonalInfo::with(['createdBy', 'updatedBy', 'businesses', 'gurukulRecords'])
-            ->latest()
+        $request = request();
+        $draw    = (int) $request->input('draw', 0);
+        $start   = max(0, (int) $request->input('start', 0));
+        $length  = (int) $request->input('length', 10);
+        if ($length < 1) {
+            $length = 10;
+        }
+        if ($length > 100) {
+            $length = 100;
+        }
+
+        $searchBy  = (string) $request->input('search_by', 'name');
+        $searchRaw = trim((string) data_get($request->input('search'), 'value', $request->input('search_value', '')));
+
+        $allowedSearch = ['name', 'phone', 'address', 'aadhaar', 'unique_id', 'all'];
+        if (! in_array($searchBy, $allowedSearch, true)) {
+            $searchBy = 'name';
+        }
+
+        $base = PersonalInfo::query();
+        $recordsTotal = (clone $base)->count();
+
+        $filtered = clone $base;
+        if ($searchRaw !== '') {
+            $this->applyMemberSearch($filtered, $searchBy, $searchRaw);
+        }
+        $recordsFiltered = (clone $filtered)->count();
+
+        $orderColMap = [
+            1 => 'unique_id',
+            2 => 'en_first_name',
+            3 => 'aadhaar_number',
+            4 => 'phone_1',
+            5 => 'gender',
+            6 => 'is_gurukul_student',
+            7 => 'created_at',
+        ];
+        $orderInput = $request->input('order.0', []);
+        $orderIdx   = (int) ($orderInput['column'] ?? 1);
+        $orderDir   = (($orderInput['dir'] ?? 'desc') === 'asc') ? 'asc' : 'desc';
+        $orderCol   = $orderColMap[$orderIdx] ?? 'unique_id';
+
+        $rows = $filtered
+            ->with(['createdBy', 'updatedBy'])
+            ->withCount(['businesses', 'gurukulRecords'])
+            ->orderBy($orderCol, $orderDir)
+            ->orderByDesc('id')
+            ->skip($start)
+            ->take($length)
             ->get()
             ->map(fn (PersonalInfo $p) => [
                 'id'                 => $p->id,
                 'unique_id'          => $p->unique_id,
-                'full_name'          => $p->englishFullName(),
+                'full_name'          => $p->display_name ?: $p->englishFullName(),
                 'gu_full_name'       => $p->gujaratiFullName(),
                 'initials'           => $p->initials(),
                 'aadhaar'            => $p->aadhaarFormatted(),
@@ -38,17 +85,90 @@ class ParivarController extends AdminController
                 'gender_label'       => config('parivar.genders.' . $p->gender, $p->gender),
                 'phone'              => $p->primaryPhone(),
                 'native_place'       => $p->native_place,
+                'current_address'    => $p->current_address,
                 'is_gurukul_student' => (bool) $p->is_gurukul_student,
                 'photo_url'          => $p->photoUrl(),
-                'business_count'     => $p->businesses->count(),
-                'gurukul_count'      => $p->gurukulRecords->count(),
+                'business_count'     => (int) $p->businesses_count,
+                'gurukul_count'      => (int) $p->gurukul_records_count,
                 'created'            => $p->created_at->format('d M Y'),
                 'created_by_name'    => $p->createdBy?->name,
                 'updated_by_name'    => $p->updatedBy?->name,
                 'updated_at_fmt'     => $p->updated_at?->format('d M Y'),
-            ]);
+            ])
+            ->values();
 
-        return response()->json(['data' => $members]);
+        return response()->json([
+            'draw'            => $draw,
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $rows,
+        ]);
+    }
+
+    private function applyMemberSearch($query, string $searchBy, string $term): void
+    {
+        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $term) . '%';
+        $digits = preg_replace('/\D+/', '', $term) ?: '';
+
+        $query->where(function ($q) use ($searchBy, $like, $digits, $term) {
+            if ($searchBy === 'name' || $searchBy === 'all') {
+                $q->orWhere(function ($nameQ) use ($like) {
+                    $nameQ->where('en_first_name', 'ilike', $like)
+                        ->orWhere('en_last_name', 'ilike', $like)
+                        ->orWhere('en_middle_name', 'ilike', $like)
+                        ->orWhere('display_name', 'ilike', $like)
+                        ->orWhere('gu_first_name', 'ilike', $like)
+                        ->orWhere('gu_last_name', 'ilike', $like)
+                        ->orWhere('gu_middle_name', 'ilike', $like)
+                        ->orWhereRaw(
+                            "concat_ws(' ', en_first_name, en_middle_name, en_last_name) ilike ?",
+                            [$like]
+                        )
+                        ->orWhereRaw(
+                            "concat_ws(' ', en_first_name, en_last_name) ilike ?",
+                            [$like]
+                        );
+                });
+            }
+
+            if ($searchBy === 'phone' || $searchBy === 'all') {
+                $q->orWhere(function ($phoneQ) use ($like, $digits) {
+                    $phoneQ->where('phone_1', 'ilike', $like)
+                        ->orWhere('phone_2', 'ilike', $like);
+                    if ($digits !== '') {
+                        $phoneQ->orWhereRaw(
+                            "regexp_replace(coalesce(phone_1, ''), '[^0-9]', '', 'g') like ?",
+                            ['%' . $digits . '%']
+                        )->orWhereRaw(
+                            "regexp_replace(coalesce(phone_2, ''), '[^0-9]', '', 'g') like ?",
+                            ['%' . $digits . '%']
+                        );
+                    }
+                });
+            }
+
+            if ($searchBy === 'address' || $searchBy === 'all') {
+                $q->orWhere(function ($addrQ) use ($like) {
+                    $addrQ->where('current_address', 'ilike', $like)
+                        ->orWhere('native_place', 'ilike', $like);
+                });
+            }
+
+            if ($searchBy === 'aadhaar' || $searchBy === 'all') {
+                $q->orWhere(function ($aadhaarQ) use ($like, $digits) {
+                    $aadhaarQ->where('aadhaar_number', 'ilike', $like);
+                    if ($digits !== '') {
+                        $aadhaarQ->orWhere('aadhaar_number', 'like', '%' . $digits . '%');
+                    }
+                });
+            }
+
+            if ($searchBy === 'unique_id' || $searchBy === 'all') {
+                if (ctype_digit($term) || $digits !== '') {
+                    $q->orWhere('unique_id', (int) ($digits !== '' ? $digits : $term));
+                }
+            }
+        });
     }
 
     public function AddEditAction($id = null)

@@ -25,10 +25,23 @@
             <span class="uc-title">All Members</span>
             <span class="uc-count" id="memberCountBadge">—</span>
         </span>
-        <div class="uc-search-box">
-            <i class="bi bi-search uc-search-ico"></i>
-            <input type="text" id="ucSearch" class="uc-search-inp"
-                   placeholder="Search members…" autocomplete="off">
+        <div class="uc-filters">
+            <select id="searchBy" class="uc-search-by" title="Search by">
+                <option value="name">Name</option>
+                <option value="phone">Phone</option>
+                <option value="address">Address</option>
+                <option value="aadhaar">Aadhaar</option>
+                <option value="unique_id">Member ID</option>
+                <option value="all">All fields</option>
+            </select>
+            <div class="uc-search-box">
+                <i class="bi bi-search uc-search-ico"></i>
+                <input type="text" id="ucSearch" class="uc-search-inp"
+                       placeholder="Search by name…" autocomplete="off">
+                <button type="button" class="uc-search-clear d-none" id="ucSearchClear" title="Clear" aria-label="Clear search">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -49,6 +62,21 @@
     </table>
 </div>
 
+<div class="modal fade" id="photoPreviewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:420px;">
+        <div class="modal-content" style="border:none;border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--sh-lg);">
+            <div class="modal-header px-3 py-2 border-0">
+                <h6 class="modal-title mb-0" id="photoPreviewTitle" style="font-weight:700;font-size:.9rem;">Photo</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center px-3 pb-3 pt-0">
+                <img id="photoPreviewImg" src="" alt="Member photo"
+                     style="max-width:100%;max-height:70vh;border-radius:10px;border:1px solid var(--border);object-fit:contain;background:#fafafa;">
+            </div>
+        </div>
+    </div>
+</div>
+
 @endsection
 
 @push('styles')
@@ -60,6 +88,7 @@
     overflow: hidden;
 }
 .uc-header {
+    display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;
     padding: .82rem 1.25rem !important;
     border-bottom: 1.5px solid var(--border-light) !important;
 }
@@ -70,6 +99,17 @@
     border-radius: 2rem; padding: .18em .72em;
     font-size: .71rem; font-weight: 700; letter-spacing: .2px;
 }
+.uc-filters { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.uc-search-by {
+    border: 1.5px solid var(--border); border-radius: 2rem;
+    padding: .38rem .9rem; font-size: .8rem; font-family: inherit;
+    color: var(--text); background: var(--bg); outline: none; min-width: 120px;
+    cursor: pointer;
+}
+.uc-search-by:focus {
+    border-color: var(--primary); background: #fff;
+    box-shadow: 0 0 0 3px rgba(139,26,26,.09);
+}
 .uc-search-box { position: relative; }
 .uc-search-ico {
     position: absolute; left: .75rem; top: 50%; transform: translateY(-50%);
@@ -77,7 +117,7 @@
 }
 .uc-search-inp {
     border: 1.5px solid var(--border); border-radius: 2rem;
-    padding: .38rem 1rem .38rem 2.1rem;
+    padding: .38rem 2.1rem .38rem 2.1rem;
     font-size: .82rem; font-family: inherit;
     color: var(--text); background: var(--bg);
     outline: none; width: 210px;
@@ -88,6 +128,23 @@
     box-shadow: 0 0 0 3px rgba(139,26,26,.09); width: 255px;
 }
 .uc-search-inp::placeholder { color: var(--text-muted); }
+.uc-search-clear {
+    position: absolute; right: .45rem; top: 50%; transform: translateY(-50%);
+    width: 22px; height: 22px; border: none; border-radius: 50%;
+    background: transparent; color: var(--text-muted);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: .7rem; padding: 0; cursor: pointer;
+}
+.uc-search-clear:hover { background: rgba(139,26,26,.08); color: var(--primary); }
+.member-photo {
+    width: 34px; height: 42px; object-fit: cover; border-radius: 6px;
+    flex-shrink: 0; border: 1px solid var(--border); cursor: zoom-in;
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+.member-photo:hover {
+    transform: scale(1.06);
+    box-shadow: 0 2px 8px rgba(139,26,26,.18);
+}
 #membersTable { border-collapse: collapse !important; }
 #membersTable_wrapper { border: none !important; }
 #membersTable .btn-edit:hover { background: rgba(139,26,26,.07) !important; border-color: var(--primary) !important; }
@@ -117,6 +174,9 @@
     background: rgba(139,26,26,.08);
     border-radius: .4rem; padding: .2em .55em;
 }
+@media (max-width: 576px) {
+    .uc-search-inp, .uc-search-inp:focus { width: 100%; min-width: 160px; }
+}
 </style>
 @endpush
 
@@ -129,11 +189,37 @@
     var canEdit    = {{ auth()->user()->can('parivar-edit') ? 'true' : 'false' }};
     var canDelete  = {{ auth()->user()->can('parivar-delete') ? 'true' : 'false' }};
     var searchTimer;
+    var placeholders = {
+        name: 'Search by name…',
+        phone: 'Search by phone…',
+        address: 'Search by address / native place…',
+        aadhaar: 'Search by Aadhaar…',
+        unique_id: 'Search by member ID…',
+        all: 'Search all fields…'
+    };
+
+    var photoModalEl = document.getElementById('photoPreviewModal');
+    function photoModal() {
+        return bootstrap.Modal.getOrCreateInstance(photoModalEl);
+    }
 
     var dt = $('#membersTable').DataTable({
         processing : true,
-        serverSide : false,
-        ajax       : { url: URL_DATA, type: 'GET' },
+        serverSide : true,
+        ajax: {
+            url: URL_DATA,
+            type: 'GET',
+            data: function (d) {
+                d.search_by = $('#searchBy').val() || 'name';
+                d.search_value = $('#ucSearch').val() || '';
+            },
+            error: function (xhr) {
+                var msg = (xhr.responseJSON && xhr.responseJSON.message)
+                    ? xhr.responseJSON.message
+                    : 'Could not load members.';
+                Swal.fire({ icon: 'error', title: 'Error', text: msg });
+            }
+        },
         order      : [[1, 'desc']],
         pageLength : 10,
         scrollX    : true,
@@ -157,16 +243,18 @@
                     var sub = row.gu_full_name
                         ? '<div style="font-size:.75rem;color:var(--text-muted);font-family:\'Noto Sans Gujarati\',inherit;">' + esc(row.gu_full_name) + '</div>'
                         : '';
+                    var photo = row.photo_url
+                        ? '<img src="' + esc(row.photo_url) + '" alt="" class="member-photo" data-photo="' + esc(row.photo_url) + '" data-name="' + esc(val) + '" title="View photo">'
+                        : '<div class="avatar-init" style="width:34px;height:34px;font-size:.75rem;flex-shrink:0;">' + esc(row.initials || '?') + '</div>';
                     return '<div class="d-flex align-items-center gap-2">'
-                         + (row.photo_url
-                            ? '<img src="' + esc(row.photo_url) + '" alt="" style="width:34px;height:42px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--border);">'
-                            : '<div class="avatar-init" style="width:34px;height:34px;font-size:.75rem;flex-shrink:0;">' + esc(row.initials || '?') + '</div>')
+                         + photo
                          + '<div><div style="font-size:.875rem;font-weight:600;color:var(--text);">' + esc(val) + '</div>' + sub + '</div>'
                          + '</div>';
                 }
             },
             {
                 data: 'aadhaar',
+                orderable: true,
                 render: function (val) {
                     return val
                         ? '<span style="font-family:ui-monospace,monospace;font-size:.8rem;color:var(--text-2);letter-spacing:.02em;">' + esc(val) + '</span>'
@@ -175,6 +263,7 @@
             },
             {
                 data: 'phone',
+                orderable: true,
                 render: function (val) {
                     return val
                         ? '<span style="color:var(--text-2);">' + esc(val) + '</span>'
@@ -183,6 +272,7 @@
             },
             {
                 data: 'gender_label',
+                orderable: true,
                 render: function (val) {
                     return val
                         ? '<span style="font-size:.82rem;color:var(--text-2);">' + esc(val) + '</span>'
@@ -191,6 +281,7 @@
             },
             {
                 data: 'is_gurukul_student',
+                orderable: true,
                 render: function (val, type, row) {
                     var badge = val
                         ? '<span class="badge" style="background:rgba(25,135,84,.12);color:#198754;font-size:.73rem;padding:.32em .75em;border-radius:.35rem;">Student</span>'
@@ -203,6 +294,7 @@
             },
             {
                 data: 'created_by_name',
+                orderable: true,
                 render: function (val, type, row) {
                     return renderAudit(val, row.created, row.updated_by_name, row.updated_at_fmt);
                 }
@@ -239,17 +331,62 @@
             },
         },
         drawCallback: function () {
-            var api      = this.api();
-            var total    = api.data().length;
-            var filtered = api.rows({ search: 'applied' }).count();
-            $('#memberCountBadge').text(filtered === total ? total + ' total' : filtered + ' / ' + total);
+            var api = this.api();
+            var info = api.page.info();
+            $('#memberCountBadge').text(
+                info.recordsDisplay === info.recordsTotal
+                    ? info.recordsTotal + ' total'
+                    : info.recordsDisplay + ' / ' + info.recordsTotal
+            );
         },
     });
 
+    function reloadSearch() {
+        dt.ajax.reload();
+    }
+
+    function syncClearBtn() {
+        $('#ucSearchClear').toggleClass('d-none', !$('#ucSearch').val());
+    }
+
+    $('#searchBy').on('change', function () {
+        var key = $(this).val() || 'name';
+        $('#ucSearch').attr('placeholder', placeholders[key] || 'Search…');
+        if ($('#ucSearch').val()) {
+            reloadSearch();
+        }
+    });
+
     $('#ucSearch').on('input', function () {
+        syncClearBtn();
         clearTimeout(searchTimer);
-        var val = this.value;
-        searchTimer = setTimeout(function () { dt.search(val).draw(); }, 220);
+        searchTimer = setTimeout(reloadSearch, 280);
+    });
+
+    $('#ucSearch').on('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            clearTimeout(searchTimer);
+            reloadSearch();
+        }
+    });
+
+    $('#ucSearchClear').on('click', function () {
+        $('#ucSearch').val('');
+        syncClearBtn();
+        reloadSearch();
+        $('#ucSearch').focus();
+    });
+
+    $('#membersTable').on('click', '.member-photo', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var src = $(this).data('photo');
+        var name = $(this).data('name') || 'Photo';
+        if (!src) return;
+        $('#photoPreviewImg').attr('src', src).attr('alt', name);
+        $('#photoPreviewTitle').text(name);
+        photoModal().show();
     });
 
     $('#membersTable').on('click', '.btn-del', function () {
