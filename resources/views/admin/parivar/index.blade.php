@@ -211,7 +211,10 @@
             type: 'GET',
             data: function (d) {
                 d.search_by = $('#searchBy').val() || 'name';
-                d.search_value = $('#ucSearch').val() || '';
+                d.search_value = String($('#ucSearch').val() || '').trim();
+                // Prevent DataTables empty search[value] from overriding our field.
+                if (!d.search) d.search = {};
+                d.search.value = d.search_value;
             },
             error: function (xhr) {
                 var msg = (xhr.responseJSON && xhr.responseJSON.message)

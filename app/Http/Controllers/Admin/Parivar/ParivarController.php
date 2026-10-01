@@ -36,7 +36,10 @@ class ParivarController extends AdminController
         }
 
         $searchBy  = (string) $request->input('search_by', 'name');
-        $searchRaw = trim((string) data_get($request->input('search'), 'value', $request->input('search_value', '')));
+        $searchRaw = trim((string) (
+            $request->input('search_value')
+            ?: data_get($request->input('search'), 'value', '')
+        ));
 
         $allowedSearch = ['name', 'phone', 'address', 'aadhaar', 'unique_id', 'all'];
         if (! in_array($searchBy, $allowedSearch, true)) {
