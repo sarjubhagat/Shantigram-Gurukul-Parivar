@@ -58,9 +58,10 @@ class ParivarController extends AdminController
         $orderColMap = [
             1 => 'unique_id',
             2 => 'en_first_name',
-            3 => 'aadhaar_number',
+            3 => 'phone_1',
             4 => 'current_address',
-            5 => 'created_at',
+            5 => 'aadhaar_number',
+            6 => 'created_at',
         ];
         $orderInput = $request->input('order.0', []);
         $orderIdx   = (int) ($orderInput['column'] ?? 1);

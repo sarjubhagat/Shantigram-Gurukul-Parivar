@@ -51,8 +51,9 @@
                 <th style="width:50px;">#</th>
                 <th style="width:90px;">ID</th>
                 <th>Name</th>
-                <th>Aadhaar</th>
+                <th>Number</th>
                 <th>Address</th>
+                <th>Aadhaar</th>
                 <th>Created By</th>
                 <th class="text-center" style="width:100px;">Actions</th>
             </tr>
@@ -254,11 +255,11 @@
                 }
             },
             {
-                data: 'aadhaar',
+                data: 'phone',
                 orderable: true,
                 render: function (val) {
                     return val
-                        ? '<span style="font-family:ui-monospace,monospace;font-size:.8rem;color:var(--text-2);letter-spacing:.02em;">' + esc(val) + '</span>'
+                        ? '<span style="color:var(--text-2);">' + esc(val) + '</span>'
                         : '<span style="color:var(--text-muted);">—</span>';
                 }
             },
@@ -278,6 +279,15 @@
                         html += '<div style="font-size:.72rem;color:var(--text-muted);margin-top:.15rem;">Native: ' + esc(native) + '</div>';
                     }
                     return html;
+                }
+            },
+            {
+                data: 'aadhaar',
+                orderable: true,
+                render: function (val) {
+                    return val
+                        ? '<span style="font-family:ui-monospace,monospace;font-size:.8rem;color:var(--text-2);letter-spacing:.02em;">' + esc(val) + '</span>'
+                        : '<span style="color:var(--text-muted);">—</span>';
                 }
             },
             {
