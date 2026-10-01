@@ -52,9 +52,7 @@
                 <th style="width:90px;">ID</th>
                 <th>Name</th>
                 <th>Aadhaar</th>
-                <th>Phone</th>
-                <th>Gender</th>
-                <th>Gurukul</th>
+                <th>Address</th>
                 <th>Created By</th>
                 <th class="text-center" style="width:100px;">Actions</th>
             </tr>
@@ -265,34 +263,21 @@
                 }
             },
             {
-                data: 'phone',
-                orderable: true,
-                render: function (val) {
-                    return val
-                        ? '<span style="color:var(--text-2);">' + esc(val) + '</span>'
-                        : '<span style="color:var(--text-muted);">—</span>';
-                }
-            },
-            {
-                data: 'gender_label',
-                orderable: true,
-                render: function (val) {
-                    return val
-                        ? '<span style="font-size:.82rem;color:var(--text-2);">' + esc(val) + '</span>'
-                        : '<span style="color:var(--text-muted);">—</span>';
-                }
-            },
-            {
-                data: 'is_gurukul_student',
+                data: 'current_address',
                 orderable: true,
                 render: function (val, type, row) {
-                    var badge = val
-                        ? '<span class="badge" style="background:rgba(25,135,84,.12);color:#198754;font-size:.73rem;padding:.32em .75em;border-radius:.35rem;">Student</span>'
-                        : '<span class="badge" style="background:rgba(108,117,125,.12);color:#6c757d;font-size:.73rem;padding:.32em .75em;border-radius:.35rem;">—</span>';
-                    var extra = row.gurukul_count
-                        ? '<div style="font-size:.7rem;color:var(--text-muted);margin-top:.15rem;">' + row.gurukul_count + ' record' + (row.gurukul_count > 1 ? 's' : '') + '</div>'
+                    var address = val || '';
+                    var native = row.native_place || '';
+                    if (!address && !native) {
+                        return '<span style="color:var(--text-muted);">—</span>';
+                    }
+                    var html = address
+                        ? '<div style="font-size:.82rem;color:var(--text-2);max-width:260px;white-space:normal;line-height:1.35;">' + esc(address) + '</div>'
                         : '';
-                    return badge + extra;
+                    if (native) {
+                        html += '<div style="font-size:.72rem;color:var(--text-muted);margin-top:.15rem;">Native: ' + esc(native) + '</div>';
+                    }
+                    return html;
                 }
             },
             {

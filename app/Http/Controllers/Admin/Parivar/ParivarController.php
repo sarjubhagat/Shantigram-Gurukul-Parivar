@@ -59,10 +59,8 @@ class ParivarController extends AdminController
             1 => 'unique_id',
             2 => 'en_first_name',
             3 => 'aadhaar_number',
-            4 => 'phone_1',
-            5 => 'gender',
-            6 => 'is_gurukul_student',
-            7 => 'created_at',
+            4 => 'current_address',
+            5 => 'created_at',
         ];
         $orderInput = $request->input('order.0', []);
         $orderIdx   = (int) ($orderInput['column'] ?? 1);
