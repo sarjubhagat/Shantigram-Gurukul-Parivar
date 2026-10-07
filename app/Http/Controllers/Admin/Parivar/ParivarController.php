@@ -7,7 +7,10 @@ use App\Models\Parivar\BusinessInfo;
 use App\Models\Parivar\GurukulBranch;
 use App\Models\Parivar\GurukulInfo;
 use App\Models\Parivar\GurukulSaint;
+use App\Models\Parivar\PersonRelation;
 use App\Models\Parivar\PersonalInfo;
+use App\Models\Parivar\Relation;
+use App\Services\Parivar\RelationInverse;
 use App\Services\R2StorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -188,16 +191,19 @@ class ParivarController extends AdminController
                 'businesses',
                 'gurukulRecords.branch',
                 'gurukulRecords.saints',
+                'personRelations.relation',
+                'personRelations.relatedPerson',
             ])->findOrFail($id);
         } else {
             $tab = 'personal';
         }
 
-        $branches = GurukulBranch::orderBy('branch_name')->get();
-        $saints   = GurukulSaint::orderBy('name')->get();
-        $years    = range((int) date('Y') + 1, 1950);
+        $branches  = GurukulBranch::orderBy('branch_name')->get();
+        $saints    = GurukulSaint::orderBy('name')->get();
+        $years     = range((int) date('Y') + 1, 1950);
+        $relations = Relation::active()->orderBy('relation')->get();
 
-        return view('admin.parivar.form', compact('member', 'tab', 'branches', 'saints', 'years'));
+        return view('admin.parivar.form', compact('member', 'tab', 'branches', 'saints', 'years', 'relations'));
     }
 
     public function handlePost(int $id = null): RedirectResponse
@@ -309,6 +315,54 @@ class ParivarController extends AdminController
         return response()->json(['success' => true, 'matches' => $matches]);
     }
 
+    public function searchMembers(Request $request): JsonResponse
+    {
+        $q = trim((string) $request->input('q', ''));
+        $exceptId = $request->integer('except_id') ?: null;
+
+        if (mb_strlen($q) < 1) {
+            return response()->json(['success' => true, 'results' => []]);
+        }
+
+        $digits = preg_replace('/\D+/', '', $q);
+
+        $results = PersonalInfo::query()
+            ->when($exceptId, fn ($query) => $query->where('id', '!=', $exceptId))
+            ->where(function ($query) use ($q, $digits) {
+                $query->where('en_first_name', 'ilike', '%' . $q . '%')
+                    ->orWhere('en_last_name', 'ilike', '%' . $q . '%')
+                    ->orWhere('en_middle_name', 'ilike', '%' . $q . '%')
+                    ->orWhere('display_name', 'ilike', '%' . $q . '%')
+                    ->orWhereRaw(
+                        "concat_ws(' ', en_first_name, en_middle_name, en_last_name) ilike ?",
+                        ['%' . $q . '%']
+                    );
+
+                if (ctype_digit($q)) {
+                    $query->orWhere('unique_id', (int) $q)
+                        ->orWhere('aadhaar_number', 'like', '%' . $q . '%');
+                }
+
+                if (strlen($digits) >= 4) {
+                    $query->orWhere('phone_1', 'like', '%' . $digits . '%')
+                        ->orWhere('phone_2', 'like', '%' . $digits . '%');
+                }
+            })
+            ->orderBy('unique_id')
+            ->limit(12)
+            ->get()
+            ->map(fn (PersonalInfo $p) => [
+                'id'        => $p->id,
+                'unique_id' => $p->unique_id,
+                'full_name' => $p->display_name ?: $p->englishFullName(),
+                'phone'     => $p->primaryPhone(),
+                'label'     => '#' . $p->unique_id . ' · ' . ($p->display_name ?: $p->englishFullName()),
+            ])
+            ->values();
+
+        return response()->json(['success' => true, 'results' => $results]);
+    }
+
     public function update(Request $request, int $id): JsonResponse
     {
         $member  = PersonalInfo::findOrFail($id);
@@ -318,6 +372,7 @@ class ParivarController extends AdminController
             'personal' => $this->updatePersonal($request, $member),
             'business' => $this->saveBusiness($request, $member),
             'gurukul'  => $this->saveGurukul($request, $member),
+            'relation' => $this->savePersonRelation($request, $member),
             'branch'   => $this->saveMaster($request, 'branch'),
             'saint'    => $this->saveMaster($request, 'saint'),
             default    => response()->json(['success' => false, 'message' => 'Unknown section.'], 422),
@@ -334,19 +389,21 @@ class ParivarController extends AdminController
         }
 
         $count = match ($type) {
-            'business' => BusinessInfo::whereIn('id', $ids)->delete(),
-            'gurukul'  => $this->deleteGurukulRows($ids),
-            'branch'   => GurukulBranch::whereIn('id', $ids)->delete(),
-            'saint'    => GurukulSaint::whereIn('id', $ids)->delete(),
-            default    => $this->deleteMembers($ids),
+            'business'        => BusinessInfo::whereIn('id', $ids)->delete(),
+            'gurukul'         => $this->deleteGurukulRows($ids),
+            'branch'          => GurukulBranch::whereIn('id', $ids)->delete(),
+            'saint'           => GurukulSaint::whereIn('id', $ids)->delete(),
+            'person_relation' => $this->deletePersonRelations($ids),
+            default           => $this->deleteMembers($ids),
         };
 
         $labels = [
-            'member'   => 'member(s)',
-            'business' => 'business record(s)',
-            'gurukul'  => 'gurukul record(s)',
-            'branch'   => 'branch(es)',
-            'saint'    => 'saint(s)',
+            'member'          => 'member(s)',
+            'business'        => 'business record(s)',
+            'gurukul'         => 'gurukul record(s)',
+            'branch'          => 'branch(es)',
+            'saint'           => 'saint(s)',
+            'person_relation' => 'relation(s)',
         ];
 
         return response()->json([
@@ -530,6 +587,193 @@ class ParivarController extends AdminController
             'message' => $msg,
             'record'  => $row->fresh()->toFormArray(),
         ]);
+    }
+
+    private function savePersonRelation(Request $request, PersonalInfo $member): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'record_id'                => 'nullable|integer',
+            'relation_id'              => 'required|integer|exists:relations,id',
+            'related_personal_info_id' => [
+                'required',
+                'integer',
+                'exists:personal_info,id',
+                Rule::notIn([(int) $member->id]),
+            ],
+        ], [
+            'related_personal_info_id.not_in' => 'A person cannot be related to themselves.',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        $data = $validator->validated();
+        $rid  = $data['record_id'] ?? null;
+
+        $duplicate = PersonRelation::query()
+            ->where('personal_info_id', $member->id)
+            ->where('relation_id', $data['relation_id'])
+            ->where('related_personal_info_id', $data['related_personal_info_id'])
+            ->when($rid, fn ($q) => $q->where('id', '!=', $rid))
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This relation already exists for this member.',
+                'errors'  => [
+                    'related_personal_info_id' => ['This relation already exists for this member.'],
+                ],
+            ], 422);
+        }
+
+        if ($rid) {
+            $row = PersonRelation::where('personal_info_id', $member->id)->findOrFail($rid);
+            $row->update([
+                'relation_id'              => $data['relation_id'],
+                'related_personal_info_id' => $data['related_personal_info_id'],
+            ]);
+            $msg = 'Relation updated.';
+        } else {
+            $row = PersonRelation::create([
+                'personal_info_id'         => $member->id,
+                'relation_id'              => $data['relation_id'],
+                'related_personal_info_id' => $data['related_personal_info_id'],
+            ]);
+            $msg = 'Relation added.';
+        }
+
+        $this->syncRelationMirror($row->fresh(['relation', 'person', 'relatedPerson', 'mirror']));
+
+        $row->load(['relation', 'relatedPerson', 'person', 'mirror']);
+
+        $mirrorNote = $row->mirror_id
+            ? ' Reverse link was also saved on the related person.'
+            : '';
+
+        return response()->json([
+            'success' => true,
+            'message' => $msg . $mirrorNote,
+            'record'  => $row->toFormArray(),
+        ]);
+    }
+
+    /**
+     * Keep the reverse person_relation in sync (Father↔Son, Brother↔Brother, etc.).
+     */
+    private function syncRelationMirror(PersonRelation $row): void
+    {
+        $from = $row->person ?: PersonalInfo::find($row->personal_info_id);
+        $related = $row->relatedPerson ?: PersonalInfo::find($row->related_personal_info_id);
+        $relationName = $row->relation?->relation;
+
+        if (! $from || ! $related || ! $relationName) {
+            return;
+        }
+
+        $inverse = RelationInverse::resolveRelation($relationName, $from, $related);
+
+        // Remove old mirror if inverse cannot be resolved or target changed.
+        if (! $inverse) {
+            $this->detachRelationMirror($row);
+
+            return;
+        }
+
+        $mirror = $row->mirror_id
+            ? PersonRelation::find($row->mirror_id)
+            : null;
+
+        // Prefer existing reverse row for this pair (legacy / re-link).
+        if (! $mirror) {
+            $mirror = PersonRelation::query()
+                ->where('personal_info_id', $related->id)
+                ->where('related_personal_info_id', $from->id)
+                ->where(function ($q) use ($row) {
+                    $q->whereNull('mirror_id')->orWhere('mirror_id', $row->id);
+                })
+                ->first();
+        }
+
+        $mirrorPayload = [
+            'personal_info_id'         => $related->id,
+            'relation_id'              => $inverse->id,
+            'related_personal_info_id' => $from->id,
+        ];
+
+        // Avoid unique conflict with an unrelated duplicate reverse.
+        $conflict = PersonRelation::query()
+            ->where('personal_info_id', $related->id)
+            ->where('relation_id', $inverse->id)
+            ->where('related_personal_info_id', $from->id)
+            ->when($mirror, fn ($q) => $q->where('id', '!=', $mirror->id))
+            ->exists();
+
+        if ($conflict) {
+            // Reverse already exists independently — link to it if possible.
+            $mirror = PersonRelation::query()
+                ->where('personal_info_id', $related->id)
+                ->where('relation_id', $inverse->id)
+                ->where('related_personal_info_id', $from->id)
+                ->first();
+        } elseif ($mirror) {
+            $mirror->update($mirrorPayload);
+        } else {
+            $mirror = PersonRelation::create($mirrorPayload);
+        }
+
+        if (! $mirror) {
+            return;
+        }
+
+        if ((int) $row->mirror_id !== (int) $mirror->id) {
+            $row->update(['mirror_id' => $mirror->id]);
+        }
+        if ((int) $mirror->mirror_id !== (int) $row->id) {
+            $mirror->update(['mirror_id' => $row->id]);
+        }
+    }
+
+    private function detachRelationMirror(PersonRelation $row): void
+    {
+        if (! $row->mirror_id) {
+            return;
+        }
+
+        $mirror = PersonRelation::find($row->mirror_id);
+        $row->update(['mirror_id' => null]);
+
+        if ($mirror) {
+            if ((int) $mirror->mirror_id === (int) $row->id) {
+                $mirror->update(['mirror_id' => null]);
+            }
+            $mirror->delete();
+        }
+    }
+
+    private function deletePersonRelations(array $ids): int
+    {
+        $rows = PersonRelation::whereIn('id', $ids)->get();
+        $count = 0;
+
+        foreach ($rows as $row) {
+            $mirrorId = $row->mirror_id;
+            $row->update(['mirror_id' => null]);
+
+            if ($mirrorId) {
+                $mirror = PersonRelation::find($mirrorId);
+                if ($mirror) {
+                    $mirror->update(['mirror_id' => null]);
+                    $mirror->delete();
+                }
+            }
+
+            $row->delete();
+            $count++;
+        }
+
+        return $count;
     }
 
     // ── Gurukul ───────────────────────────────────────────

@@ -80,6 +80,22 @@ class PersonalInfo extends Model
                 }
             });
 
+            $person->allPersonRelations()->get()->each(function (PersonRelation $rel) use ($isForce) {
+                if ($isForce) {
+                    $rel->forceDelete();
+                } else {
+                    $rel->delete();
+                }
+            });
+
+            $person->allRelatedAsTarget()->get()->each(function (PersonRelation $rel) use ($isForce) {
+                if ($isForce) {
+                    $rel->forceDelete();
+                } else {
+                    $rel->delete();
+                }
+            });
+
             if ($isForce) {
                 $person->qrToken()->delete();
                 $person->dataUpdates()->delete();
@@ -123,6 +139,26 @@ class PersonalInfo extends Model
     public function dataUpdates(): HasMany
     {
         return $this->hasMany(DataUpdate::class, 'personal_info_id', 'id');
+    }
+
+    public function personRelations(): HasMany
+    {
+        return $this->hasMany(PersonRelation::class, 'personal_info_id');
+    }
+
+    public function allPersonRelations(): HasMany
+    {
+        return $this->hasMany(PersonRelation::class, 'personal_info_id')->withTrashed();
+    }
+
+    public function relatedAsTarget(): HasMany
+    {
+        return $this->hasMany(PersonRelation::class, 'related_personal_info_id');
+    }
+
+    public function allRelatedAsTarget(): HasMany
+    {
+        return $this->hasMany(PersonRelation::class, 'related_personal_info_id')->withTrashed();
     }
 
     public function englishFullName(): string

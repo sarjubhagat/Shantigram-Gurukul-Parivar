@@ -7,6 +7,7 @@
     $codes    = config('parivar.country_codes');
     $genders  = config('parivar.genders');
     $maritals = config('parivar.marital_statuses');
+    $relations = $relations ?? collect();
     $old      = fn ($key, $fallback = '') => old($key, $isEdit ? ($member->{$key} ?? $fallback) : $fallback);
 @endphp
 
@@ -36,6 +37,7 @@
      data-delete-url="{{ route('admin.parivar.delete') }}"
      data-generate-aadhaar-url="{{ route('admin.parivar.generate_aadhaar') }}"
      data-check-phone-url="{{ route('admin.parivar.check_phone') }}"
+     data-search-members-url="{{ route('admin.parivar.search_members') }}"
      data-edit-base="{{ url('/admin/parivar') }}">
 
     <div class="row g-4 align-items-start">
@@ -197,6 +199,88 @@
                                 <label class="form-label">દાદાનું નામ</label>
                                 <input type="text" name="gu_grandfather_name" class="form-control gu-input" value="{{ $old('gu_grandfather_name') }}" placeholder="દાદાનું નામ" lang="gu">
                             </div>
+                        </div>
+
+                        <div class="pv-sec-label">Family relations</div>
+                        <div class="form-text mb-2" style="font-size:.78rem;">
+                            Add once — the reverse is saved automatically on the other person
+                            (e.g. Son ↔ Father / Mother, Brother ↔ Brother / Sister). Gender on both profiles improves accuracy.
+                        </div>
+                        <div class="pv-rel-box mb-3">
+                            <div id="relList" class="pv-list mb-3">
+                                @if($isEdit)
+                                    @forelse($member->personRelations as $pr)
+                                        <div class="pv-item" data-id="{{ $pr->id }}">
+                                            <div>
+                                                <div class="pv-item-title">{{ $pr->sentenceLabel() }}</div>
+                                                <div class="pv-item-sub">
+                                                    #{{ $pr->relatedPerson?->unique_id }}
+                                                    @if($pr->relation?->relation)
+                                                        · {{ $pr->relation->relation }}
+                                                    @endif
+                                                </div>
+                                            </div>
+                                            <div class="pv-item-actions">
+                                                <button type="button" class="btn btn-sm btn-light btn-rel-edit" data-id="{{ $pr->id }}"><i class="bi bi-pencil"></i></button>
+                                                <button type="button" class="btn btn-sm btn-light text-danger btn-rel-del" data-id="{{ $pr->id }}" data-name="{{ $pr->sentenceLabel() }}"><i class="bi bi-trash"></i></button>
+                                            </div>
+                                        </div>
+                                    @empty
+                                        <div class="pv-empty" id="relEmpty">No relations yet.</div>
+                                    @endforelse
+                                @else
+                                    <div class="pv-empty" id="relEmpty">Save the member first, then add relations.</div>
+                                @endif
+                            </div>
+
+                            <form id="relationForm" novalidate autocomplete="off" @if(! $isEdit) class="opacity-75" @endif>
+                                @csrf
+                                <input type="hidden" name="section" value="relation">
+                                <input type="hidden" name="record_id" id="relRecordId" value="">
+                                <input type="hidden" name="related_personal_info_id" id="relRelatedId" value="">
+                                <div class="pv-sec-label" id="relFormLabel" style="font-size:.78rem;margin-bottom:.65rem;">Add relation</div>
+
+                                <div class="pv-rel-preview mb-3" id="relPreview" aria-live="polite">
+                                    <span class="pv-rel-preview-text" id="relPreviewText">Select a relation to see the sentence.</span>
+                                </div>
+
+                                <div class="row g-3">
+                                    <div class="col-md-5">
+                                        <label class="form-label">Relation <span class="text-danger">*</span></label>
+                                        <select name="relation_id" id="relType" class="form-select" @disabled(! $isEdit)>
+                                            <option value="">Select relation</option>
+                                            @foreach($relations as $rel)
+                                                <option value="{{ $rel->id }}" data-name="{{ $rel->relation }}">{{ $rel->relation }}</option>
+                                            @endforeach
+                                        </select>
+                                        <div class="invalid-feedback" data-err="relation_id"></div>
+                                    </div>
+                                    <div class="col-md-7">
+                                        <label class="form-label">Related person <span class="text-danger">*</span></label>
+                                        <div class="pv-rel-search">
+                                            <input type="text"
+                                                   id="relPersonSearch"
+                                                   class="form-control"
+                                                   placeholder="Search by name, ID or phone"
+                                                   autocomplete="off"
+                                                   @disabled(! $isEdit)>
+                                            <div class="pv-rel-results" id="relPersonResults" hidden></div>
+                                            <div class="pv-rel-picked d-none" id="relPersonPicked">
+                                                <span id="relPersonPickedLabel"></span>
+                                                <button type="button" class="btn btn-sm btn-light" id="relPersonClear" title="Clear"><i class="bi bi-x-lg"></i></button>
+                                            </div>
+                                        </div>
+                                        <div class="invalid-feedback" data-err="related_personal_info_id"></div>
+                                    </div>
+                                </div>
+                                <div class="pv-actions" style="margin-top:1rem;">
+                                    <button type="submit" class="btn btn-primary pv-save" id="relSave" @disabled(! $isEdit)>
+                                        <span class="txt"><i class="bi bi-check-lg me-1"></i>Save Relation</span>
+                                        <span class="load d-none"><span class="spinner-border spinner-border-sm me-1"></span>Saving…</span>
+                                    </button>
+                                    <button type="button" class="btn btn-light d-none" id="relCancel">Cancel edit</button>
+                                </div>
+                            </form>
                         </div>
 
                         <div class="pv-sec-label">Identity</div>
@@ -762,6 +846,52 @@
 .pv-phone-match-name { font-size: .82rem; font-weight: 700; color: var(--text); }
 .pv-phone-match-meta { font-size: .72rem; color: var(--text-muted); }
 .pv-phone-match i { color: var(--primary); font-size: .85rem; }
+.pv-rel-box {
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--r);
+    padding: 1rem 1.05rem 1.05rem;
+    background: linear-gradient(180deg, rgba(139,26,26,.03), #fff 40%);
+}
+.pv-rel-preview {
+    border: 1.5px dashed rgba(139,26,26,.28);
+    border-radius: .55rem;
+    background: rgba(139,26,26,.05);
+    padding: .7rem .9rem;
+}
+.pv-rel-preview-text {
+    font-size: .92rem;
+    font-weight: 700;
+    color: var(--primary);
+    line-height: 1.35;
+}
+.pv-rel-preview-text .pv-rel-blank {
+    border-bottom: 1.5px solid rgba(139,26,26,.35);
+    padding: 0 .15rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+.pv-rel-search { position: relative; }
+.pv-rel-results {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
+    background: #fff; border: 1.5px solid var(--border); border-radius: .55rem;
+    box-shadow: 0 10px 28px rgba(0,0,0,.08); max-height: 240px; overflow: auto;
+}
+.pv-rel-result {
+    width: 100%; border: 0; background: transparent; text-align: left;
+    padding: .55rem .75rem; cursor: pointer; display: block;
+    border-bottom: 1px solid var(--border-light);
+}
+.pv-rel-result:last-child { border-bottom: 0; }
+.pv-rel-result:hover { background: rgba(139,26,26,.06); }
+.pv-rel-result-name { font-size: .82rem; font-weight: 700; color: var(--text); display: block; }
+.pv-rel-result-meta { font-size: .72rem; color: var(--text-muted); }
+.pv-rel-picked {
+    margin-top: .45rem;
+    display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+    border: 1.5px solid rgba(139,26,26,.2); border-radius: .5rem;
+    background: rgba(139,26,26,.05); padding: .4rem .55rem .4rem .7rem;
+    font-size: .82rem; font-weight: 600; color: var(--text);
+}
 .pv-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .pv-chip {
     display: inline-flex; align-items: center; gap: .3rem;
@@ -795,11 +925,13 @@
     var deleteUrl   = $app.data('delete-url');
     var genAadhaarUrl = $app.data('generate-aadhaar-url');
     var checkPhoneUrl = $app.data('check-phone-url');
+    var searchMembersUrl = $app.data('search-members-url');
     var editBase    = $app.data('edit-base');
     var currentTab  = $app.data('tab') || 'personal';
 
     var bizStore = {};
     var gkStore  = {};
+    var relStore = {};
 
     @if($isEdit)
         @foreach($member->businesses as $biz)
@@ -807,6 +939,9 @@
         @endforeach
         @foreach($member->gurukulRecords as $gk)
             gkStore[{{ (int) $gk->id }}] = @json($gk->toFormArray());
+        @endforeach
+        @foreach($member->personRelations as $pr)
+            relStore[{{ (int) $pr->id }}] = @json($pr->toFormArray());
         @endforeach
     @endif
 
@@ -1056,6 +1191,180 @@
         var url = $(this).data('url');
         if (url) window.location.href = url;
     });
+
+    // ── Relations ─────────────────────────────────────────
+    var relSearchTimer = null;
+    var relPickedName = '';
+
+    function currentMemberName() {
+        return $.trim($('#pvName').text()) || 'This person';
+    }
+
+    function updateRelPreview() {
+        var $opt = $('#relType option:selected');
+        var relName = ($opt.data('name') || $opt.text() || '').toString().trim();
+        if (!$('#relType').val() || !relName || relName === 'Select relation') {
+            $('#relPreviewText').text('Select a relation to see the sentence.');
+            return;
+        }
+        var blank = relPickedName
+            ? esc(relPickedName)
+            : '<span class="pv-rel-blank">______</span>';
+        $('#relPreviewText').html(
+            esc(currentMemberName()) + "'s " + esc(relName.toLowerCase()) + ' is ' + blank
+        );
+    }
+
+    function setRelPerson(id, label, name) {
+        $('#relRelatedId').val(id || '');
+        relPickedName = name || '';
+        if (id) {
+            $('#relPersonPickedLabel').text(label || name);
+            $('#relPersonPicked').removeClass('d-none');
+            $('#relPersonSearch').addClass('d-none').val('');
+            $('#relPersonResults').attr('hidden', true).empty();
+        } else {
+            $('#relPersonPicked').addClass('d-none');
+            $('#relPersonPickedLabel').text('');
+            $('#relPersonSearch').removeClass('d-none');
+        }
+        updateRelPreview();
+    }
+
+    function resetRel() {
+        $('#relationForm')[0].reset();
+        $('#relRecordId').val('');
+        $('#relFormLabel').text('Add relation');
+        $('#relCancel').addClass('d-none');
+        setRelPerson('', '', '');
+        clearErrors($('#relationForm'));
+        updateRelPreview();
+    }
+
+    function renderRelResults(rows) {
+        var $box = $('#relPersonResults');
+        if (!rows.length) {
+            $box.html('<div class="pv-rel-result-meta" style="padding:.65rem .75rem;">No members found.</div>').removeAttr('hidden');
+            return;
+        }
+        var html = rows.map(function (r) {
+            return '<button type="button" class="pv-rel-result" data-id="' + r.id + '" data-name="' + esc(r.full_name) + '" data-label="' + esc(r.label) + '">'
+                + '<span class="pv-rel-result-name">' + esc(r.full_name) + '</span>'
+                + '<span class="pv-rel-result-meta">#' + esc(String(r.unique_id)) + (r.phone ? ' · ' + esc(r.phone) : '') + '</span>'
+                + '</button>';
+        }).join('');
+        $box.html(html).removeAttr('hidden');
+    }
+
+    $('#relType').on('change', updateRelPreview);
+    $('#en_first_name, #en_last_name, #display_name').on('input', updateRelPreview);
+
+    $('#relPersonSearch').on('input', function () {
+        if (!hasMember) return;
+        var q = $.trim($(this).val());
+        clearTimeout(relSearchTimer);
+        if (q.length < 1) {
+            $('#relPersonResults').attr('hidden', true).empty();
+            return;
+        }
+        relSearchTimer = setTimeout(function () {
+            $.getJSON(searchMembersUrl, { q: q, except_id: memberId || '' })
+                .done(function (r) { renderRelResults(r.results || []); })
+                .fail(function () { $('#relPersonResults').attr('hidden', true).empty(); });
+        }, 250);
+    });
+
+    $('#relPersonResults').on('click', '.pv-rel-result', function () {
+        setRelPerson($(this).data('id'), $(this).data('label'), $(this).data('name'));
+    });
+
+    $('#relPersonClear').on('click', function () {
+        setRelPerson('', '', '');
+        $('#relPersonSearch').focus();
+    });
+
+    $(document).on('click', function (e) {
+        if (!$(e.target).closest('.pv-rel-search').length) {
+            $('#relPersonResults').attr('hidden', true);
+        }
+    });
+
+    $('#relCancel').on('click', resetRel);
+
+    $('#relationForm').on('submit', function (e) {
+        e.preventDefault();
+        if (!hasMember) {
+            Swal.fire({
+                icon: 'info',
+                title: 'Create the member first',
+                text: 'Personal information must be saved before relations can be added.',
+                confirmButtonColor: '#8B1A1A',
+            });
+            return;
+        }
+        var $form = $(this);
+        clearErrors($form);
+        setSaving($('#relSave'), true);
+        $.ajax({
+            url: updateUrl,
+            type: 'POST',
+            data: $form.serialize(),
+            success: function (r) {
+                relStore[r.record.id] = r.record;
+                upsertItem('#relList', '#relEmpty', r.record.id, relHtml(r.record));
+                resetRel();
+                toast(r.message);
+            },
+            error: function (xhr) {
+                var res = xhr.responseJSON || {};
+                if (xhr.status === 422 && res.errors) showErrors($form, res.errors);
+                else Swal.fire({ icon: 'error', title: 'Error', text: res.message || 'Could not save.' });
+            },
+            complete: function () { setSaving($('#relSave'), false); }
+        });
+    });
+
+    $('#relList').on('click', '.btn-rel-edit', function () {
+        var id = $(this).data('id');
+        var row = relStore[id] || relStore[String(id)];
+        if (!row) {
+            Swal.fire({ icon: 'error', title: 'Error', text: 'Could not load this relation.' });
+            return;
+        }
+        $('#relRecordId').val(row.id);
+        $('#relType').val(String(row.relation_id));
+        setRelPerson(
+            row.related_personal_info_id,
+            '#' + row.related_unique_id + ' · ' + row.related_name,
+            row.related_name
+        );
+        $('#relFormLabel').text('Edit relation');
+        $('#relCancel').removeClass('d-none');
+        updateRelPreview();
+    });
+
+    $('#relList').on('click', '.btn-rel-del', function () {
+        var id = $(this).data('id'), name = $(this).data('name');
+        delRecord('person_relation', id, name, function (deletedId) {
+            delete relStore[deletedId];
+            $('#relList .pv-item[data-id="' + deletedId + '"]').remove();
+            ensureEmpty('#relList', '#relEmpty', 'No relations yet.');
+        });
+    });
+
+    function relHtml(row) {
+        return '<div class="pv-item" data-id="' + row.id + '">'
+            + '<div><div class="pv-item-title">' + esc(row.label) + '</div>'
+            + '<div class="pv-item-sub">#' + esc(String(row.related_unique_id || ''))
+            + (row.relation_name ? ' · ' + esc(row.relation_name) : '')
+            + '</div></div>'
+            + '<div class="pv-item-actions">'
+            + '<button type="button" class="btn btn-sm btn-light btn-rel-edit" data-id="' + row.id + '"><i class="bi bi-pencil"></i></button>'
+            + '<button type="button" class="btn btn-sm btn-light text-danger btn-rel-del" data-id="' + row.id + '" data-name="' + esc(row.label) + '"><i class="bi bi-trash"></i></button>'
+            + '</div></div>';
+    }
+
+    updateRelPreview();
 
     // ── Business ──────────────────────────────────────────
     function resetBiz() {

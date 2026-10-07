@@ -4,6 +4,7 @@ namespace App\Models\Parivar;
 
 use App\Traits\TracksAudit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Relation extends Model
@@ -29,5 +30,10 @@ class Relation extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    public function personRelations(): HasMany
+    {
+        return $this->hasMany(PersonRelation::class, 'relation_id');
     }
 }
