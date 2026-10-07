@@ -147,6 +147,9 @@ Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () 
                     Route::get('/search-members', [$ctrlClass, 'searchMembers'])
                         ->name('search_members')
                         ->middleware($list_perm);
+                    Route::get('/suggest-relations', [$ctrlClass, 'suggestRelations'])
+                        ->name('suggest_relations')
+                        ->middleware($list_perm);
                 }
 
                 if (str_contains($ctrlClass, 'IcardPrintController')) {

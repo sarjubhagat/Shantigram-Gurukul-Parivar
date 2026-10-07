@@ -363,6 +363,270 @@ class ParivarController extends AdminController
         return response()->json(['success' => true, 'results' => $results]);
     }
 
+    /**
+     * Suggest possible family links from naming pattern (both directions):
+     * Surname + First + Father(middle) + Grandfather.
+     * e.g. Nirmal Kapil → Father Kapil; on Kapil → Son Nirmal (mirror auto-saved).
+     */
+    public function suggestRelations(Request $request): JsonResponse
+    {
+        $exceptId = $request->integer('except_id') ?: null;
+        $surname  = $this->normalizeNamePart($request->input('en_last_name'));
+        $first    = $this->normalizeNamePart($request->input('en_first_name'));
+        $middle   = $this->normalizeNamePart($request->input('en_middle_name'));
+        $grandpa  = $this->normalizeNamePart($request->input('en_grandfather_name'));
+        $myGender = mb_strtolower(trim((string) $request->input('gender', '')));
+
+        if ($surname === '' || ($first === '' && $middle === '' && $grandpa === '')) {
+            return response()->json(['success' => true, 'suggestions' => []]);
+        }
+
+        $meShort = $first !== '' ? $this->titleName($first) : 'This person';
+        $currentStub = new PersonalInfo([
+            'en_first_name' => $first,
+            'gender'        => in_array($myGender, ['male', 'female'], true) ? $myGender : null,
+        ]);
+
+        $existingRelatedIds = [];
+        if ($exceptId) {
+            $existingRelatedIds = PersonRelation::query()
+                ->where('personal_info_id', $exceptId)
+                ->pluck('related_personal_info_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+        }
+
+        $relationMap = Relation::active()
+            ->get()
+            ->keyBy(fn (Relation $r) => mb_strtolower($r->relation));
+
+        $suggestions = collect();
+        $sameSurname = fn ($q) => $q
+            ->when($exceptId, fn ($qq) => $qq->where('id', '!=', $exceptId))
+            ->whereRaw('lower(trim(coalesce(en_last_name, \'\'))) = ?', [$surname]);
+
+        // 1) Parent: my father-name = their first name → I am son/daughter, they are father/mother.
+        if ($middle !== '') {
+            foreach (
+                PersonalInfo::query()->tap($sameSurname)
+                    ->whereRaw('lower(trim(coalesce(en_first_name, \'\'))) = ?', [$middle])
+                    ->orderBy('unique_id')->limit(8)->get() as $parent
+            ) {
+                if (in_array((int) $parent->id, $existingRelatedIds, true)) {
+                    continue;
+                }
+                $relName = $this->suggestedParentRelationName($parent->gender);
+                $rel = $relationMap->get(mb_strtolower($relName));
+                if (! $rel) {
+                    continue;
+                }
+                $otherShort = $this->titleName($parent->en_first_name) ?: ($parent->display_name ?: $parent->englishFullName());
+                $mirrorName = RelationInverse::resolveName($rel->relation, $currentStub, $parent)
+                    ?: $this->suggestedChildRelationName($myGender ?: null);
+                $suggestions->push($this->buildSuggestion(
+                    'parent',
+                    $parent,
+                    $rel,
+                    $meShort . "'s " . mb_strtolower($rel->relation) . ' may be ' . $otherShort,
+                    $otherShort . "'s " . mb_strtolower($mirrorName) . ' would be ' . $meShort,
+                    'Same surname; father name matches their name'
+                ));
+            }
+        }
+
+        // 2) Child: their father-name = my first name → they are son/daughter, I am father/mother.
+        if ($first !== '') {
+            foreach (
+                PersonalInfo::query()->tap($sameSurname)
+                    ->whereRaw('lower(trim(coalesce(en_middle_name, \'\'))) = ?', [$first])
+                    ->orderBy('unique_id')->limit(8)->get() as $child
+            ) {
+                if (in_array((int) $child->id, $existingRelatedIds, true)) {
+                    continue;
+                }
+                $relName = $this->suggestedChildRelationName($child->gender);
+                $rel = $relationMap->get(mb_strtolower($relName));
+                if (! $rel) {
+                    continue;
+                }
+                $otherShort = $this->titleName($child->en_first_name) ?: ($child->display_name ?: $child->englishFullName());
+                $mirrorName = RelationInverse::resolveName($rel->relation, $currentStub, $child)
+                    ?: $this->suggestedParentRelationName($myGender ?: null);
+                $suggestions->push($this->buildSuggestion(
+                    'child',
+                    $child,
+                    $rel,
+                    $meShort . "'s " . mb_strtolower($rel->relation) . ' may be ' . $otherShort,
+                    $otherShort . "'s " . mb_strtolower($mirrorName) . ' would be ' . $meShort,
+                    'Same surname; their father name matches this person\'s name'
+                ));
+            }
+        }
+
+        // 3) Sibling: same surname + same father name.
+        if ($middle !== '') {
+            foreach (
+                PersonalInfo::query()->tap($sameSurname)
+                    ->whereRaw('lower(trim(coalesce(en_middle_name, \'\'))) = ?', [$middle])
+                    ->when($first !== '', fn ($q) => $q->whereRaw(
+                        'lower(trim(coalesce(en_first_name, \'\'))) != ?',
+                        [$first]
+                    ))
+                    ->orderBy('unique_id')->limit(8)->get() as $sib
+            ) {
+                if (in_array((int) $sib->id, $existingRelatedIds, true)) {
+                    continue;
+                }
+                $relName = $this->suggestedSiblingRelationName($sib->gender);
+                $rel = $relationMap->get(mb_strtolower($relName));
+                if (! $rel) {
+                    continue;
+                }
+                $otherShort = $this->titleName($sib->en_first_name) ?: ($sib->display_name ?: $sib->englishFullName());
+                $mirrorName = RelationInverse::resolveName($rel->relation, $currentStub, $sib)
+                    ?: $this->suggestedSiblingRelationName($myGender ?: null);
+                $suggestions->push($this->buildSuggestion(
+                    'sibling',
+                    $sib,
+                    $rel,
+                    $meShort . "'s " . mb_strtolower($rel->relation) . ' may be ' . $otherShort,
+                    $otherShort . "'s " . mb_strtolower($mirrorName) . ' would be ' . $meShort,
+                    'Same surname and same father name'
+                ));
+            }
+        }
+
+        // 4) Grandparent: my grandfather name = their first name.
+        if ($grandpa !== '') {
+            foreach (
+                PersonalInfo::query()->tap($sameSurname)
+                    ->whereRaw('lower(trim(coalesce(en_first_name, \'\'))) = ?', [$grandpa])
+                    ->orderBy('unique_id')->limit(6)->get() as $gp
+            ) {
+                if (in_array((int) $gp->id, $existingRelatedIds, true)) {
+                    continue;
+                }
+                $relName = mb_strtolower((string) $gp->gender) === 'female' ? 'Grandmother' : 'Grandfather';
+                $rel = $relationMap->get(mb_strtolower($relName));
+                if (! $rel) {
+                    continue;
+                }
+                $otherShort = $this->titleName($gp->en_first_name) ?: ($gp->display_name ?: $gp->englishFullName());
+                $mirrorName = RelationInverse::resolveName($rel->relation, $currentStub, $gp)
+                    ?: ($myGender === 'female' ? 'Granddaughter' : 'Grandson');
+                $suggestions->push($this->buildSuggestion(
+                    'grandparent',
+                    $gp,
+                    $rel,
+                    $meShort . "'s " . mb_strtolower($rel->relation) . ' may be ' . $otherShort,
+                    $otherShort . "'s " . mb_strtolower($mirrorName) . ' would be ' . $meShort,
+                    'Same surname; grandfather name matches their name'
+                ));
+            }
+        }
+
+        // 5) Grandchild: their grandfather name = my first name.
+        if ($first !== '') {
+            foreach (
+                PersonalInfo::query()->tap($sameSurname)
+                    ->whereRaw('lower(trim(coalesce(en_grandfather_name, \'\'))) = ?', [$first])
+                    ->orderBy('unique_id')->limit(6)->get() as $gc
+            ) {
+                if (in_array((int) $gc->id, $existingRelatedIds, true)) {
+                    continue;
+                }
+                $relName = $this->suggestedChildRelationName($gc->gender) === 'Daughter' ? 'Granddaughter' : 'Grandson';
+                // Prefer Grandson/Granddaughter if seeded; else Son/Daughter.
+                $rel = $relationMap->get(mb_strtolower($relName))
+                    ?: $relationMap->get(mb_strtolower($this->suggestedChildRelationName($gc->gender)));
+                if (! $rel) {
+                    continue;
+                }
+                $otherShort = $this->titleName($gc->en_first_name) ?: ($gc->display_name ?: $gc->englishFullName());
+                $mirrorName = RelationInverse::resolveName($rel->relation, $currentStub, $gc)
+                    ?: $this->suggestedParentRelationName($myGender ?: null);
+                if (str_contains(mb_strtolower($rel->relation), 'grand')) {
+                    $mirrorName = $myGender === 'female' ? 'Grandmother' : 'Grandfather';
+                }
+                $suggestions->push($this->buildSuggestion(
+                    'grandchild',
+                    $gc,
+                    $rel,
+                    $meShort . "'s " . mb_strtolower($rel->relation) . ' may be ' . $otherShort,
+                    $otherShort . "'s " . mb_strtolower($mirrorName) . ' would be ' . $meShort,
+                    'Same surname; their grandfather name matches this person\'s name'
+                ));
+            }
+        }
+
+        $priority = [
+            'parent' => 1, 'child' => 2, 'sibling' => 3,
+            'grandparent' => 4, 'grandchild' => 5,
+        ];
+        $suggestions = $suggestions
+            ->sortBy(fn ($s) => ($priority[$s['type']] ?? 9) . '-' . $s['related_unique_id'])
+            ->unique('related_id')
+            ->values()
+            ->take(12);
+
+        return response()->json([
+            'success'      => true,
+            'suggestions'  => $suggestions,
+        ]);
+    }
+
+    private function buildSuggestion(
+        string $type,
+        PersonalInfo $other,
+        Relation $rel,
+        string $label,
+        string $mirrorLabel,
+        string $reason
+    ): array {
+        return [
+            'key'               => $type . '-' . $other->id,
+            'type'              => $type,
+            'related_id'        => $other->id,
+            'related_unique_id' => $other->unique_id,
+            'related_name'      => $other->display_name ?: $other->englishFullName(),
+            'relation_id'       => $rel->id,
+            'relation_name'     => $rel->relation,
+            'label'             => $label,
+            'mirror_label'      => $mirrorLabel,
+            'reason'            => $reason,
+            'edit_url'          => url('/admin/parivar/' . $other->id . '/edit'),
+        ];
+    }
+
+    private function normalizeNamePart(mixed $value): string
+    {
+        $v = trim(preg_replace('/\s+/', ' ', (string) $value) ?? '');
+
+        return mb_strtolower($v);
+    }
+
+    private function titleName(?string $value): string
+    {
+        $v = trim((string) $value);
+
+        return $v === '' ? '' : mb_convert_case($v, MB_CASE_TITLE, 'UTF-8');
+    }
+
+    private function suggestedParentRelationName(?string $parentGender): string
+    {
+        return mb_strtolower((string) $parentGender) === 'female' ? 'Mother' : 'Father';
+    }
+
+    private function suggestedChildRelationName(?string $childGender): string
+    {
+        return mb_strtolower((string) $childGender) === 'female' ? 'Daughter' : 'Son';
+    }
+
+    private function suggestedSiblingRelationName(?string $siblingGender): string
+    {
+        return mb_strtolower((string) $siblingGender) === 'female' ? 'Sister' : 'Brother';
+    }
+
     public function update(Request $request, int $id): JsonResponse
     {
         $member  = PersonalInfo::findOrFail($id);

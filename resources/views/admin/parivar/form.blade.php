@@ -38,6 +38,7 @@
      data-generate-aadhaar-url="{{ route('admin.parivar.generate_aadhaar') }}"
      data-check-phone-url="{{ route('admin.parivar.check_phone') }}"
      data-search-members-url="{{ route('admin.parivar.search_members') }}"
+     data-suggest-relations-url="{{ route('admin.parivar.suggest_relations') }}"
      data-edit-base="{{ url('/admin/parivar') }}">
 
     <div class="row g-4 align-items-start">
@@ -166,12 +167,12 @@
                             </div>
                             <div class="col-md-6 col-xl-3">
                                 <label class="form-label">Father Name</label>
-                                <input type="text" name="en_middle_name" class="form-control" value="{{ $old('en_middle_name') }}" placeholder="Middle name">
+                                <input type="text" name="en_middle_name" id="en_middle_name" class="form-control" value="{{ $old('en_middle_name') }}" placeholder="Middle name">
                             </div>
                            
                             <div class="col-md-6 col-xl-3">
                                 <label class="form-label">Grandfather name</label>
-                                <input type="text" name="en_grandfather_name" class="form-control" value="{{ $old('en_grandfather_name') }}" placeholder="Grandfather">
+                                <input type="text" name="en_grandfather_name" id="en_grandfather_name" class="form-control" value="{{ $old('en_grandfather_name') }}" placeholder="Grandfather">
                             </div>
                             <div class="col-12">
                                 <label class="form-label">Display name <span class="pv-sec-note">used on I-card / print</span></label>
@@ -206,6 +207,16 @@
                             Add once — the reverse is saved automatically on the other person
                             (e.g. Son ↔ Father / Mother, Brother ↔ Brother / Sister). Gender on both profiles improves accuracy.
                         </div>
+
+                        <div id="relSuggestBox" class="pv-rel-suggest mb-3" hidden>
+                            <div class="pv-rel-suggest-head">
+                                <i class="bi bi-lightbulb"></i>
+                                <span>Possible relations from name pattern</span>
+                            </div>
+                            <div id="relSuggestList" class="pv-rel-suggest-list"></div>
+                            <div class="pv-rel-suggest-note">Suggestions only — not always true. Review before adding.</div>
+                        </div>
+
                         <div class="pv-rel-box mb-3">
                             <div id="relList" class="pv-list mb-3">
                                 @if($isEdit)
@@ -233,11 +244,10 @@
                                 @endif
                             </div>
 
-                            <form id="relationForm" novalidate autocomplete="off" @if(! $isEdit) class="opacity-75" @endif>
-                                @csrf
-                                <input type="hidden" name="section" value="relation">
-                                <input type="hidden" name="record_id" id="relRecordId" value="">
-                                <input type="hidden" name="related_personal_info_id" id="relRelatedId" value="">
+                            {{-- div (not form): nested forms break personalForm layout in browsers --}}
+                            <div id="relationForm" autocomplete="off" @if(! $isEdit) class="opacity-75" @endif>
+                                <input type="hidden" id="relRecordId" value="">
+                                <input type="hidden" id="relRelatedId" value="">
                                 <div class="pv-sec-label" id="relFormLabel" style="font-size:.78rem;margin-bottom:.65rem;">Add relation</div>
 
                                 <div class="pv-rel-preview mb-3" id="relPreview" aria-live="polite">
@@ -247,7 +257,7 @@
                                 <div class="row g-3">
                                     <div class="col-md-5">
                                         <label class="form-label">Relation <span class="text-danger">*</span></label>
-                                        <select name="relation_id" id="relType" class="form-select" @disabled(! $isEdit)>
+                                        <select id="relType" class="form-select" @disabled(! $isEdit)>
                                             <option value="">Select relation</option>
                                             @foreach($relations as $rel)
                                                 <option value="{{ $rel->id }}" data-name="{{ $rel->relation }}">{{ $rel->relation }}</option>
@@ -274,13 +284,13 @@
                                     </div>
                                 </div>
                                 <div class="pv-actions" style="margin-top:1rem;">
-                                    <button type="submit" class="btn btn-primary pv-save" id="relSave" @disabled(! $isEdit)>
+                                    <button type="button" class="btn btn-primary pv-save" id="relSave" @disabled(! $isEdit)>
                                         <span class="txt"><i class="bi bi-check-lg me-1"></i>Save Relation</span>
                                         <span class="load d-none"><span class="spinner-border spinner-border-sm me-1"></span>Saving…</span>
                                     </button>
                                     <button type="button" class="btn btn-light d-none" id="relCancel">Cancel edit</button>
                                 </div>
-                            </form>
+                            </div>
                         </div>
 
                         <div class="pv-sec-label">Identity</div>
@@ -892,6 +902,25 @@
     background: rgba(139,26,26,.05); padding: .4rem .55rem .4rem .7rem;
     font-size: .82rem; font-weight: 600; color: var(--text);
 }
+.pv-rel-suggest {
+    border: 1.5px solid rgba(180, 120, 20, .35);
+    border-radius: var(--r);
+    background: linear-gradient(180deg, rgba(255, 214, 102, .18), #fff 55%);
+    padding: .85rem 1rem;
+}
+.pv-rel-suggest-head {
+    display: flex; align-items: center; gap: .45rem;
+    font-size: .8rem; font-weight: 700; color: #8a5a00; margin-bottom: .65rem;
+}
+.pv-rel-suggest-list { display: flex; flex-direction: column; gap: .45rem; }
+.pv-rel-suggest-item {
+    display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+    background: #fff; border: 1px solid var(--border-light); border-radius: .5rem;
+    padding: .55rem .7rem;
+}
+.pv-rel-suggest-title { font-size: .84rem; font-weight: 700; color: var(--text); line-height: 1.3; }
+.pv-rel-suggest-meta { font-size: .72rem; color: var(--text-muted); margin-top: .15rem; }
+.pv-rel-suggest-note { font-size: .72rem; color: var(--text-muted); margin-top: .55rem; }
 .pv-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .pv-chip {
     display: inline-flex; align-items: center; gap: .3rem;
@@ -926,8 +955,11 @@
     var genAadhaarUrl = $app.data('generate-aadhaar-url');
     var checkPhoneUrl = $app.data('check-phone-url');
     var searchMembersUrl = $app.data('search-members-url');
+    var suggestRelationsUrl = $app.data('suggest-relations-url');
     var editBase    = $app.data('edit-base');
     var currentTab  = $app.data('tab') || 'personal';
+    var relSuggestTimer = null;
+    var dismissedSuggestions = {};
 
     var bizStore = {};
     var gkStore  = {};
@@ -1028,6 +1060,7 @@
                     $('#btnPickPhoto').html('<i class="bi bi-upload me-1"></i>' + (r.member.has_photo ? 'Replace photo' : 'Upload photo'));
                 }
                 toast(r.message);
+                scheduleRelationSuggestions();
             },
             error: function (xhr) {
                 var res = xhr.responseJSON || {};
@@ -1192,6 +1225,139 @@
         if (url) window.location.href = url;
     });
 
+    // ── Relation name-pattern suggestions ─────────────────
+    function fetchRelationSuggestions() {
+        if (!suggestRelationsUrl) return;
+        var surname = $.trim($('#en_last_name').val() || '');
+        var first   = $.trim($('#en_first_name').val() || '');
+        var middle  = $.trim($('#en_middle_name').val() || '');
+        var grandpa = $.trim($('#en_grandfather_name').val() || '');
+        if (!surname || (!first && !middle && !grandpa)) {
+            $('#relSuggestBox').attr('hidden', true);
+            $('#relSuggestList').empty();
+            return;
+        }
+
+        $.getJSON(suggestRelationsUrl, {
+            except_id: memberId || '',
+            en_last_name: surname,
+            en_first_name: first,
+            en_middle_name: middle,
+            en_grandfather_name: grandpa,
+            gender: $('select[name="gender"]').val() || ''
+        }).done(function (r) {
+            renderRelationSuggestions(r.suggestions || []);
+        }).fail(function () {
+            $('#relSuggestBox').attr('hidden', true);
+        });
+    }
+
+    function scheduleRelationSuggestions() {
+        clearTimeout(relSuggestTimer);
+        relSuggestTimer = setTimeout(fetchRelationSuggestions, 350);
+    }
+
+    function renderRelationSuggestions(rows) {
+        rows = (rows || []).filter(function (s) {
+            return !dismissedSuggestions[s.key];
+        });
+        var $box = $('#relSuggestBox');
+        var $list = $('#relSuggestList');
+        if (!rows.length) {
+            $box.attr('hidden', true);
+            $list.empty();
+            return;
+        }
+
+        var html = rows.map(function (s) {
+            var addBtn = hasMember
+                ? '<button type="button" class="btn btn-sm btn-primary btn-rel-suggest-add" data-key="' + esc(s.key) + '"'
+                    + ' data-relation-id="' + s.relation_id + '"'
+                    + ' data-related-id="' + s.related_id + '"'
+                    + ' data-related-name="' + esc(s.related_name) + '"'
+                    + ' data-related-uid="' + esc(String(s.related_unique_id)) + '"'
+                    + ' data-relation-name="' + esc(s.relation_name) + '">'
+                    + '<i class="bi bi-plus-lg me-1"></i>Add</button>'
+                : '<span class="pv-rel-suggest-meta">Save member first</span>';
+
+            return '<div class="pv-rel-suggest-item" data-key="' + esc(s.key) + '">'
+                + '<div>'
+                + '<div class="pv-rel-suggest-title">' + esc(s.label) + '</div>'
+                + (s.mirror_label
+                    ? '<div class="pv-rel-suggest-meta"><i class="bi bi-arrow-left-right me-1"></i>' + esc(s.mirror_label) + '</div>'
+                    : '')
+                + '<div class="pv-rel-suggest-meta">#' + esc(String(s.related_unique_id))
+                + ' · ' + esc(s.related_name)
+                + (s.reason ? ' · ' + esc(s.reason) : '')
+                + '</div></div>'
+                + '<div class="d-flex gap-1 flex-shrink-0">'
+                + addBtn
+                + '<button type="button" class="btn btn-sm btn-light btn-rel-suggest-dismiss" data-key="' + esc(s.key) + '" title="Dismiss"><i class="bi bi-x-lg"></i></button>'
+                + '</div></div>';
+        }).join('');
+
+        $list.html(html);
+        $box.removeAttr('hidden');
+    }
+
+    $('#en_last_name, #en_first_name, #en_middle_name, #en_grandfather_name').on('blur', scheduleRelationSuggestions);
+    $('select[name="gender"]').on('change', scheduleRelationSuggestions);
+
+    $('#relSuggestList').on('click', '.btn-rel-suggest-dismiss', function () {
+        var key = $(this).data('key');
+        dismissedSuggestions[key] = true;
+        $(this).closest('.pv-rel-suggest-item').remove();
+        if (!$('#relSuggestList .pv-rel-suggest-item').length) {
+            $('#relSuggestBox').attr('hidden', true);
+        }
+    });
+
+    $('#relSuggestList').on('click', '.btn-rel-suggest-add', function () {
+        if (!hasMember || !updateUrl) {
+            Swal.fire({
+                icon: 'info',
+                title: 'Create the member first',
+                text: 'Save personal information, then you can add this relation.',
+                confirmButtonColor: '#8B1A1A',
+            });
+            return;
+        }
+
+        var $btn = $(this);
+        var payload = {
+            _token: csrfToken,
+            section: 'relation',
+            relation_id: $btn.data('relation-id'),
+            related_personal_info_id: $btn.data('related-id')
+        };
+
+        $btn.prop('disabled', true);
+        $.ajax({
+            url: updateUrl,
+            type: 'POST',
+            data: payload,
+            success: function (r) {
+                relStore[r.record.id] = r.record;
+                upsertItem('#relList', '#relEmpty', r.record.id, relHtml(r.record));
+                dismissedSuggestions[$btn.data('key')] = true;
+                $btn.closest('.pv-rel-suggest-item').remove();
+                if (!$('#relSuggestList .pv-rel-suggest-item').length) {
+                    $('#relSuggestBox').attr('hidden', true);
+                }
+                toast(r.message || 'Relation added.');
+                scheduleRelationSuggestions();
+            },
+            error: function (xhr) {
+                var res = xhr.responseJSON || {};
+                Swal.fire({ icon: 'error', title: 'Error', text: res.message || 'Could not add relation.' });
+                $btn.prop('disabled', false);
+            }
+        });
+    });
+
+    // Run once on load when names are already filled.
+    setTimeout(fetchRelationSuggestions, 400);
+
     // ── Relations ─────────────────────────────────────────
     var relSearchTimer = null;
     var relPickedName = '';
@@ -1232,8 +1398,8 @@
     }
 
     function resetRel() {
-        $('#relationForm')[0].reset();
         $('#relRecordId').val('');
+        $('#relType').val('');
         $('#relFormLabel').text('Add relation');
         $('#relCancel').addClass('d-none');
         setRelPerson('', '', '');
@@ -1291,8 +1457,7 @@
 
     $('#relCancel').on('click', resetRel);
 
-    $('#relationForm').on('submit', function (e) {
-        e.preventDefault();
+    $('#relSave').on('click', function () {
         if (!hasMember) {
             Swal.fire({
                 icon: 'info',
@@ -1302,23 +1467,35 @@
             });
             return;
         }
-        var $form = $(this);
-        clearErrors($form);
+        var $box = $('#relationForm');
+        clearErrors($box);
         setSaving($('#relSave'), true);
         $.ajax({
             url: updateUrl,
             type: 'POST',
-            data: $form.serialize(),
+            data: {
+                _token: csrfToken,
+                section: 'relation',
+                record_id: $('#relRecordId').val() || '',
+                relation_id: $('#relType').val() || '',
+                related_personal_info_id: $('#relRelatedId').val() || ''
+            },
             success: function (r) {
                 relStore[r.record.id] = r.record;
                 upsertItem('#relList', '#relEmpty', r.record.id, relHtml(r.record));
                 resetRel();
                 toast(r.message);
+                scheduleRelationSuggestions();
             },
             error: function (xhr) {
                 var res = xhr.responseJSON || {};
-                if (xhr.status === 422 && res.errors) showErrors($form, res.errors);
-                else Swal.fire({ icon: 'error', title: 'Error', text: res.message || 'Could not save.' });
+                if (xhr.status === 422 && res.errors) {
+                    showErrors($box, res.errors);
+                    if (res.errors.relation_id) $('#relType').addClass('is-invalid');
+                    if (res.errors.related_personal_info_id) $('#relPersonSearch').addClass('is-invalid');
+                } else {
+                    Swal.fire({ icon: 'error', title: 'Error', text: res.message || 'Could not save.' });
+                }
             },
             complete: function () { setSaving($('#relSave'), false); }
         });
