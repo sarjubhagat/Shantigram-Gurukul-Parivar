@@ -150,6 +150,15 @@ Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () 
                     Route::get('/suggest-relations', [$ctrlClass, 'suggestRelations'])
                         ->name('suggest_relations')
                         ->middleware($list_perm);
+                    Route::post('/reject-relation-suggestion', [$ctrlClass, 'rejectRelationSuggestion'])
+                        ->name('reject_relation_suggestion')
+                        ->middleware($edit_perm);
+                    Route::get('/{id}/show', [$ctrlClass, 'show'])
+                        ->name('show')
+                        ->middleware($list_perm);
+                    Route::get('/{id}/view', [$ctrlClass, 'viewPage'])
+                        ->name('view')
+                        ->middleware($list_perm);
                 }
 
                 if (str_contains($ctrlClass, 'IcardPrintController')) {

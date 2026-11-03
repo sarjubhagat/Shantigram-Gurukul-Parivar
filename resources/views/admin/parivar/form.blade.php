@@ -39,6 +39,7 @@
      data-check-phone-url="{{ route('admin.parivar.check_phone') }}"
      data-search-members-url="{{ route('admin.parivar.search_members') }}"
      data-suggest-relations-url="{{ route('admin.parivar.suggest_relations') }}"
+     data-reject-relation-url="{{ route('admin.parivar.reject_relation_suggestion') }}"
      data-edit-base="{{ url('/admin/parivar') }}">
 
     <div class="row g-4 align-items-start">
@@ -214,7 +215,7 @@
                                 <span>Possible relations from name pattern</span>
                             </div>
                             <div id="relSuggestList" class="pv-rel-suggest-list"></div>
-                            <div class="pv-rel-suggest-note">Suggestions only — not always true. Review before adding.</div>
+                            <div class="pv-rel-suggest-note">Suggestions only — not always true. Use <strong>Not related</strong> to hide a wrong pair for both people permanently.</div>
                         </div>
 
                         <div class="pv-rel-box mb-3">
@@ -956,6 +957,7 @@
     var checkPhoneUrl = $app.data('check-phone-url');
     var searchMembersUrl = $app.data('search-members-url');
     var suggestRelationsUrl = $app.data('suggest-relations-url');
+    var rejectRelationUrl = $app.data('reject-relation-url');
     var editBase    = $app.data('edit-base');
     var currentTab  = $app.data('tab') || 'personal';
     var relSuggestTimer = null;
@@ -1290,9 +1292,14 @@
                 + ' · ' + esc(s.related_name)
                 + (s.reason ? ' · ' + esc(s.reason) : '')
                 + '</div></div>'
-                + '<div class="d-flex gap-1 flex-shrink-0">'
+                + '<div class="d-flex gap-1 flex-shrink-0 align-items-center">'
+                + (s.view_url
+                    ? '<a href="' + esc(s.view_url) + '" target="_blank" rel="noopener" class="btn btn-sm btn-light" title="View person (new tab)"><i class="bi bi-eye"></i></a>'
+                    : '')
                 + addBtn
-                + '<button type="button" class="btn btn-sm btn-light btn-rel-suggest-dismiss" data-key="' + esc(s.key) + '" title="Dismiss"><i class="bi bi-x-lg"></i></button>'
+                + (hasMember
+                    ? '<button type="button" class="btn btn-sm btn-outline-secondary btn-rel-suggest-reject" data-key="' + esc(s.key) + '" data-related-id="' + s.related_id + '" title="Not related — hide for both">Not related</button>'
+                    : '<button type="button" class="btn btn-sm btn-light btn-rel-suggest-dismiss" data-key="' + esc(s.key) + '" title="Dismiss for now"><i class="bi bi-x-lg"></i></button>')
                 + '</div></div>';
         }).join('');
 
@@ -1310,6 +1317,47 @@
         if (!$('#relSuggestList .pv-rel-suggest-item').length) {
             $('#relSuggestBox').attr('hidden', true);
         }
+    });
+
+    $('#relSuggestList').on('click', '.btn-rel-suggest-reject', function () {
+        if (!hasMember || !memberId) {
+            Swal.fire({
+                icon: 'info',
+                title: 'Save the member first',
+                text: 'Permanent “not related” needs both people saved.',
+                confirmButtonColor: '#8B1A1A',
+            });
+            return;
+        }
+
+        var $btn = $(this);
+        var key = $btn.data('key');
+        var relatedId = $btn.data('related-id');
+        $btn.prop('disabled', true);
+
+        $.ajax({
+            url: rejectRelationUrl,
+            type: 'POST',
+            data: {
+                _token: csrfToken,
+                personal_info_id: memberId,
+                related_personal_info_id: relatedId,
+                note: 'Not related (suggestion dismissed)'
+            },
+            success: function (r) {
+                dismissedSuggestions[key] = true;
+                $btn.closest('.pv-rel-suggest-item').remove();
+                if (!$('#relSuggestList .pv-rel-suggest-item').length) {
+                    $('#relSuggestBox').attr('hidden', true);
+                }
+                toast(r.message || 'Suggestion hidden for both people.');
+            },
+            error: function (xhr) {
+                var res = xhr.responseJSON || {};
+                Swal.fire({ icon: 'error', title: 'Error', text: res.message || 'Could not save.' });
+                $btn.prop('disabled', false);
+            }
+        });
     });
 
     $('#relSuggestList').on('click', '.btn-rel-suggest-add', function () {

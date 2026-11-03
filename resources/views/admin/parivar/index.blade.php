@@ -8,6 +8,11 @@
 @endsection
 
 @section('page-actions')
+    @canany(['parivar-export', 'parivar-list'])
+        <button type="button" class="btn btn-light btn-sm" id="btnExportParivar" title="Export current list to Excel">
+            <i class="bi bi-file-earmark-excel me-1"></i> Export Excel
+        </button>
+    @endcanany
     @can('parivar-create')
         <a href="{{ route('admin.parivar.add') }}" class="btn btn-primary btn-sm">
             <i class="bi bi-person-plus me-1"></i> Add Member
@@ -55,7 +60,7 @@
                 <th>Address</th>
                 <th>Aadhaar</th>
                 <th>Created By</th>
-                <th class="text-center" style="width:100px;">Actions</th>
+                <th class="text-center" style="width:130px;">Actions</th>
             </tr>
         </thead>
     </table>
@@ -71,6 +76,37 @@
             <div class="modal-body text-center px-3 pb-3 pt-0">
                 <img id="photoPreviewImg" src="" alt="Member photo"
                      style="max-width:100%;max-height:70vh;border-radius:10px;border:1px solid var(--border);object-fit:contain;background:#fafafa;">
+            </div>
+        </div>
+    </div>
+</div>
+
+{{-- Member quick view --}}
+<div class="modal fade" id="memberViewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+        <div class="modal-content mv-modal">
+            <div class="modal-header mv-header">
+                <div class="d-flex align-items-center gap-2 min-w-0">
+                    <span class="mv-header-ico"><i class="bi bi-person-vcard"></i></span>
+                    <div class="min-w-0">
+                        <h5 class="modal-title mb-0 text-truncate" id="mvTitle">Member details</h5>
+                        <div class="mv-header-sub" id="mvSub">—</div>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body mv-body" id="mvBody">
+                <div class="mv-loading text-center py-5 text-muted">
+                    <span class="spinner-border spinner-border-sm me-2"></span>Loading…
+                </div>
+            </div>
+            <div class="modal-footer mv-footer">
+                <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Close</button>
+                @can('parivar-edit')
+                    <a href="#" class="btn btn-primary btn-sm d-none" id="mvEditBtn">
+                        <i class="bi bi-pencil-square me-1"></i>Edit
+                    </a>
+                @endcan
             </div>
         </div>
     </div>
@@ -146,8 +182,61 @@
 }
 #membersTable { border-collapse: collapse !important; }
 #membersTable_wrapper { border: none !important; }
+#membersTable .btn-view:hover { background: rgba(13,110,253,.08) !important; border-color: #0d6efd !important; }
 #membersTable .btn-edit:hover { background: rgba(139,26,26,.07) !important; border-color: var(--primary) !important; }
 #membersTable .btn-del:hover  { background: rgba(192,57,43,.07)  !important; border-color: var(--accent)  !important; }
+.mv-modal { border: 0; border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--sh-lg); }
+.mv-header {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-mid, #a52a2a) 100%);
+    color: #fff; border: 0; padding: .85rem 1.1rem;
+}
+.mv-header-ico {
+    width: 34px; height: 34px; border-radius: .55rem; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,.16); font-size: 1rem;
+}
+.mv-header .modal-title { font-size: .95rem; font-weight: 700; }
+.mv-header-sub { font-size: .72rem; opacity: .85; margin-top: .1rem; }
+.mv-body { padding: 1rem 1.15rem 1.2rem; background: #fafafa; max-height: min(72vh, 720px); }
+.mv-footer { border-top: 1px solid var(--border-light); background: #fff; padding: .65rem 1.1rem; }
+.mv-hero {
+    display: flex; gap: 1rem; align-items: flex-start;
+    background: #fff; border: 1.5px solid var(--border-light); border-radius: .75rem;
+    padding: .9rem 1rem; margin-bottom: .9rem;
+}
+.mv-photo {
+    width: 78px; height: 104px; object-fit: cover; border-radius: 8px;
+    border: 1px solid var(--border); background: #f3f3f3; flex-shrink: 0;
+}
+.mv-photo-empty {
+    width: 78px; height: 104px; border-radius: 8px; flex-shrink: 0;
+    border: 1.5px dashed var(--border); background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; color: var(--primary); font-size: 1.1rem;
+}
+.mv-name { font-size: 1.05rem; font-weight: 700; color: var(--text); line-height: 1.25; }
+.mv-gu { font-size: .82rem; color: var(--text-muted); font-family: 'Noto Sans Gujarati', inherit; margin-top: .15rem; }
+.mv-meta { font-size: .78rem; color: var(--text-muted); margin-top: .35rem; }
+.mv-sec {
+    background: #fff; border: 1.5px solid var(--border-light); border-radius: .75rem;
+    padding: .85rem 1rem; margin-bottom: .75rem;
+}
+.mv-sec-title {
+    font-size: .72rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--primary); margin-bottom: .65rem;
+}
+.mv-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem .9rem; }
+@media (max-width: 576px) { .mv-grid { grid-template-columns: 1fr; } }
+.mv-field-label { font-size: .68rem; color: var(--text-muted); font-weight: 600; margin-bottom: .1rem; }
+.mv-field-val { font-size: .84rem; color: var(--text); font-weight: 600; word-break: break-word; }
+.mv-field-val.muted { color: var(--text-muted); font-weight: 500; }
+.mv-list-item {
+    border-top: 1px solid var(--border-light); padding: .55rem 0;
+}
+.mv-list-item:first-child { border-top: 0; padding-top: 0; }
+.mv-list-title { font-size: .84rem; font-weight: 700; color: var(--text); }
+.mv-list-sub { font-size: .74rem; color: var(--text-muted); margin-top: .12rem; }
+.mv-empty { font-size: .8rem; color: var(--text-muted); }
 .dt-foot {
     display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: .5rem;
@@ -173,6 +262,14 @@
     background: rgba(139,26,26,.08);
     border-radius: .4rem; padding: .2em .55em;
 }
+.pv-score-pill {
+    font-size: .65rem; font-weight: 800; border-radius: 2rem;
+    padding: .12em .45em; letter-spacing: .02em;
+}
+.pv-score-pill-excellent { background: rgba(31,138,76,.12); color: #1f8a4c; }
+.pv-score-pill-good { background: rgba(47,111,237,.12); color: #2f6fed; }
+.pv-score-pill-fair { background: rgba(196,122,0,.14); color: #c47a00; }
+.pv-score-pill-low { background: rgba(192,57,43,.12); color: #c0392b; }
 @media (max-width: 576px) {
     .uc-search-inp, .uc-search-inp:focus { width: 100%; min-width: 160px; }
 }
@@ -184,6 +281,8 @@
 (function () {
     var URL_DATA   = '{{ route("admin.parivar.get_data") }}';
     var URL_DELETE = '{{ route("admin.parivar.delete") }}';
+    var URL_EXPORT = '{{ route("admin.parivar.export") }}';
+    var URL_SHOW   = '{{ url("/admin/parivar") }}';
     var EDIT_BASE  = '{{ url("/admin/parivar") }}';
     var canEdit    = {{ auth()->user()->can('parivar-edit') ? 'true' : 'false' }};
     var canDelete  = {{ auth()->user()->can('parivar-delete') ? 'true' : 'false' }};
@@ -248,9 +347,14 @@
                     var photo = row.photo_url
                         ? '<img src="' + esc(row.photo_url) + '" alt="" class="member-photo" data-photo="' + esc(row.photo_url) + '" data-name="' + esc(val) + '" title="View photo">'
                         : '<div class="avatar-init" style="width:34px;height:34px;font-size:.75rem;flex-shrink:0;">' + esc(row.initials || '?') + '</div>';
+                    var score = typeof row.profile_score === 'number' ? row.profile_score : null;
+                    var level = row.profile_level || 'low';
+                    var scoreHtml = score === null ? ''
+                        : '<span class="pv-score-pill pv-score-pill-' + esc(level) + '" title="Profile score">' + score + '%</span>';
                     return '<div class="d-flex align-items-center gap-2">'
                          + photo
-                         + '<div><div style="font-size:.875rem;font-weight:600;color:var(--text);">' + esc(val) + '</div>' + sub + '</div>'
+                         + '<div><div style="font-size:.875rem;font-weight:600;color:var(--text);display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;">'
+                         + esc(val) + scoreHtml + '</div>' + sub + '</div>'
                          + '</div>';
                 }
             },
@@ -300,12 +404,14 @@
             {
                 data: null, orderable: false, searchable: false, className: 'text-center',
                 render: function (data) {
+                    var btnStyle = 'width:30px;height:30px;border:1.5px solid var(--border);background:#fff;border-radius:var(--r-sm);display:inline-flex;align-items:center;justify-content:center;';
                     var html = '<div class="d-flex gap-1 justify-content-center">';
+                    html += '<a href="' + EDIT_BASE + '/' + data.id + '/view" target="_blank" rel="noopener" class="btn btn-sm btn-icon btn-view" style="' + btnStyle + 'color:#0d6efd;" title="View details (new tab)"><i class="bi bi-eye" style="font-size:.85rem;"></i></a>';
                     if (canEdit) {
-                        html += '<a href="' + EDIT_BASE + '/' + data.id + '/edit" class="btn btn-sm btn-icon btn-edit" style="width:30px;height:30px;border:1.5px solid var(--border);background:#fff;border-radius:var(--r-sm);color:var(--primary);display:inline-flex;align-items:center;justify-content:center;" title="Manage"><i class="bi bi-pencil-square" style="font-size:.85rem;"></i></a>';
+                        html += '<a href="' + EDIT_BASE + '/' + data.id + '/edit" class="btn btn-sm btn-icon btn-edit" style="' + btnStyle + 'color:var(--primary);" title="Manage"><i class="bi bi-pencil-square" style="font-size:.85rem;"></i></a>';
                     }
                     if (canDelete) {
-                        html += '<button class="btn btn-sm btn-icon btn-del" style="width:30px;height:30px;border:1.5px solid var(--border);background:#fff;border-radius:var(--r-sm);color:var(--accent);" data-id="' + data.id + '" data-name="' + esc(data.full_name) + '" title="Delete"><i class="bi bi-trash" style="font-size:.85rem;"></i></button>';
+                        html += '<button type="button" class="btn btn-sm btn-icon btn-del" style="' + btnStyle + 'color:var(--accent);" data-id="' + data.id + '" data-name="' + esc(data.full_name) + '" title="Delete"><i class="bi bi-trash" style="font-size:.85rem;"></i></button>';
                     }
                     html += '</div>';
                     return html;
@@ -376,6 +482,14 @@
         $('#ucSearch').focus();
     });
 
+    $('#btnExportParivar').on('click', function () {
+        var params = new URLSearchParams({
+            search_by: $('#searchBy').val() || 'name',
+            search_value: String($('#ucSearch').val() || '').trim()
+        });
+        window.location.href = URL_EXPORT + '?' + params.toString();
+    });
+
     $('#membersTable').on('click', '.member-photo', function (e) {
         e.preventDefault();
         e.stopPropagation();
@@ -385,6 +499,158 @@
         $('#photoPreviewImg').attr('src', src).attr('alt', name);
         $('#photoPreviewTitle').text(name);
         photoModal().show();
+    });
+
+    var memberViewEl = document.getElementById('memberViewModal');
+    function memberViewModal() {
+        return bootstrap.Modal.getOrCreateInstance(memberViewEl);
+    }
+
+    function mvField(label, value, full) {
+        var empty = value == null || String(value).trim() === '';
+        return '<div class="' + (full ? 'mv-field' : '') + '" style="' + (full ? 'grid-column:1/-1;' : '') + '">'
+            + '<div class="mv-field-label">' + esc(label) + '</div>'
+            + '<div class="mv-field-val' + (empty ? ' muted' : '') + '">' + (empty ? '—' : esc(String(value))) + '</div>'
+            + '</div>';
+    }
+
+    function renderMemberView(payload) {
+        var m = payload.member || {};
+        var display = m.display_name || m.full_name || 'Member';
+        $('#mvTitle').text(display);
+        $('#mvSub').text('#' + (m.unique_id || '—') + (m.primary_phone ? ' · ' + m.primary_phone : ''));
+
+        var $edit = $('#mvEditBtn');
+        if ($edit.length) {
+            if (payload.edit_url) {
+                $edit.attr('href', payload.edit_url).removeClass('d-none');
+            } else {
+                $edit.addClass('d-none');
+            }
+        }
+
+        var photoHtml = m.photo_url
+            ? '<img src="' + esc(m.photo_url) + '" alt="" class="mv-photo">'
+            : '<div class="mv-photo-empty">' + esc(m.initials || '?') + '</div>';
+
+        var html = '';
+        html += '<div class="mv-hero">'
+            + photoHtml
+            + '<div class="min-w-0">'
+            + '<div class="mv-name">' + esc(display) + '</div>'
+            + (m.gu_full_name ? '<div class="mv-gu">' + esc(m.gu_full_name) + '</div>' : '')
+            + '<div class="mv-meta">ID #' + esc(String(m.unique_id || '—'))
+            + (m.aadhaar_formatted ? ' · Aadhaar ' + esc(m.aadhaar_formatted) : '')
+            + '</div>'
+            + '</div></div>';
+
+        html += '<div class="mv-sec"><div class="mv-sec-title">Personal</div><div class="mv-grid">'
+            + mvField('Surname', m.en_last_name)
+            + mvField('Name', m.en_first_name)
+            + mvField('Father name', m.en_middle_name)
+            + mvField('Grandfather', m.en_grandfather_name)
+            + mvField('Display name', m.display_name, true)
+            + mvField('Date of birth', m.date_of_birth_fmt || m.date_of_birth)
+            + mvField('Gender', m.gender_label || m.gender)
+            + mvField('Marital status', m.marital_label || m.marital_status)
+            + mvField('Gurukul student', m.is_gurukul_student ? 'Yes' : 'No')
+            + '</div></div>';
+
+        if (m.gu_first_name || m.gu_last_name || m.gu_middle_name || m.gu_grandfather_name) {
+            html += '<div class="mv-sec"><div class="mv-sec-title">Gujarati name</div><div class="mv-grid">'
+                + mvField('અટક', m.gu_last_name)
+                + mvField('નામ', m.gu_first_name)
+                + mvField('પિતાનું નામ', m.gu_middle_name)
+                + mvField('દાદાનું નામ', m.gu_grandfather_name)
+                + '</div></div>';
+        }
+
+        html += '<div class="mv-sec"><div class="mv-sec-title">Contact</div><div class="mv-grid">'
+            + mvField('Primary phone', m.primary_phone)
+            + mvField('Secondary phone', m.secondary_phone)
+            + mvField('Native place', m.native_place)
+            + mvField('Current address', m.current_address, true)
+            + '</div></div>';
+
+        html += '<div class="mv-sec"><div class="mv-sec-title">Family relations</div>';
+        if ((payload.relations || []).length) {
+            payload.relations.forEach(function (r) {
+                html += '<div class="mv-list-item">'
+                    + '<div class="mv-list-title">' + esc(r.label || ((r.relation_name || '') + ' · ' + (r.related_name || ''))) + '</div>'
+                    + '<div class="mv-list-sub">#' + esc(String(r.related_unique_id || '—'))
+                    + (r.relation_name ? ' · ' + esc(r.relation_name) : '')
+                    + '</div></div>';
+            });
+        } else {
+            html += '<div class="mv-empty">No relations linked.</div>';
+        }
+        html += '</div>';
+
+        html += '<div class="mv-sec"><div class="mv-sec-title">Business</div>';
+        if ((payload.businesses || []).length) {
+            payload.businesses.forEach(function (b) {
+                html += '<div class="mv-list-item">'
+                    + '<div class="mv-list-title">' + esc(b.business_name || 'Business') + '</div>'
+                    + '<div class="mv-list-sub">' + esc(b.business_address || 'No address') + '</div>'
+                    + '</div>';
+            });
+        } else {
+            html += '<div class="mv-empty">No business records.</div>';
+        }
+        html += '</div>';
+
+        html += '<div class="mv-sec"><div class="mv-sec-title">Gurukul</div>';
+        if ((payload.gurukul || []).length) {
+            payload.gurukul.forEach(function (g) {
+                var years = '';
+                if (g.start_year || g.end_year) {
+                    years = (g.start_year || '—') + (g.end_year ? ' – ' + g.end_year : '');
+                }
+                var saints = (g.saint_names || []).join(', ');
+                html += '<div class="mv-list-item">'
+                    + '<div class="mv-list-title">' + esc(g.branch_name || 'Branch') + '</div>'
+                    + '<div class="mv-list-sub">'
+                    + esc(years || '—')
+                    + (g.total_year ? ' · ' + esc(String(g.total_year)) + ' yr' : '')
+                    + (saints ? ' · ' + esc(saints) : '')
+                    + '</div></div>';
+            });
+        } else {
+            html += '<div class="mv-empty">No gurukul records.</div>';
+        }
+        html += '</div>';
+
+        html += '<div class="mv-sec mb-0"><div class="mv-sec-title">Audit</div><div class="mv-grid">'
+            + mvField('Created by', m.created_by_name)
+            + mvField('Created at', m.created)
+            + mvField('Updated by', m.updated_by_name)
+            + mvField('Updated at', m.updated)
+            + '</div></div>';
+
+        $('#mvBody').html(html);
+    }
+
+    $('#membersTable').on('click', '.btn-view', function () {
+        var id = $(this).data('id');
+        if (!id) return;
+        $('#mvTitle').text('Member details');
+        $('#mvSub').text('Loading…');
+        $('#mvBody').html('<div class="mv-loading text-center py-5 text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>');
+        $('#mvEditBtn').addClass('d-none');
+        memberViewModal().show();
+
+        $.getJSON(URL_SHOW + '/' + id + '/show')
+            .done(function (r) {
+                if (!r.success) {
+                    $('#mvBody').html('<div class="text-center text-danger py-4">' + esc(r.message || 'Could not load member.') + '</div>');
+                    return;
+                }
+                renderMemberView(r);
+            })
+            .fail(function (xhr) {
+                var msg = (xhr.responseJSON || {}).message || 'Could not load member details.';
+                $('#mvBody').html('<div class="text-center text-danger py-4">' + esc(msg) + '</div>');
+            });
     });
 
     $('#membersTable').on('click', '.btn-del', function () {
