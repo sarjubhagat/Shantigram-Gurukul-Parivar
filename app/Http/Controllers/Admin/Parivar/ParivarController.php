@@ -8,8 +8,13 @@ use App\Models\Parivar\GurukulBranch;
 use App\Models\Parivar\GurukulInfo;
 use App\Models\Parivar\GurukulSaint;
 use App\Models\Parivar\PersonRelation;
+use App\Models\Parivar\PersonRelationRejection;
 use App\Models\Parivar\PersonalInfo;
 use App\Models\Parivar\Relation;
+use App\Models\Parivar\PersonalInfoAudit;
+use App\Services\Parivar\DuplicateDetector;
+use App\Services\Parivar\FamilyTreeBuilder;
+use App\Services\Parivar\ProfileScore;
 use App\Services\Parivar\RelationInverse;
 use App\Services\R2StorageService;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +22,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ParivarController extends AdminController
 {
@@ -72,34 +78,40 @@ class ParivarController extends AdminController
         $orderCol   = $orderColMap[$orderIdx] ?? 'unique_id';
 
         $rows = $filtered
-            ->with(['createdBy', 'updatedBy'])
+            ->with(['createdBy', 'updatedBy', 'businesses', 'gurukulRecords', 'personRelations'])
             ->withCount(['businesses', 'gurukulRecords'])
             ->orderBy($orderCol, $orderDir)
             ->orderByDesc('id')
             ->skip($start)
             ->take($length)
             ->get()
-            ->map(fn (PersonalInfo $p) => [
-                'id'                 => $p->id,
-                'unique_id'          => $p->unique_id,
-                'full_name'          => $p->display_name ?: $p->englishFullName(),
-                'gu_full_name'       => $p->gujaratiFullName(),
-                'initials'           => $p->initials(),
-                'aadhaar'            => $p->aadhaarFormatted(),
-                'gender'             => $p->gender,
-                'gender_label'       => config('parivar.genders.' . $p->gender, $p->gender),
-                'phone'              => $p->primaryPhone(),
-                'native_place'       => $p->native_place,
-                'current_address'    => $p->current_address,
-                'is_gurukul_student' => (bool) $p->is_gurukul_student,
-                'photo_url'          => $p->photoUrl(),
-                'business_count'     => (int) $p->businesses_count,
-                'gurukul_count'      => (int) $p->gurukul_records_count,
-                'created'            => $p->created_at->format('d M Y'),
-                'created_by_name'    => $p->createdBy?->name,
-                'updated_by_name'    => $p->updatedBy?->name,
-                'updated_at_fmt'     => $p->updated_at?->format('d M Y'),
-            ])
+            ->map(function (PersonalInfo $p) {
+                $score = ProfileScore::for($p);
+
+                return [
+                    'id'                 => $p->id,
+                    'unique_id'          => $p->unique_id,
+                    'full_name'          => $p->display_name ?: $p->englishFullName(),
+                    'gu_full_name'       => $p->gujaratiFullName(),
+                    'initials'           => $p->initials(),
+                    'aadhaar'            => $p->aadhaarFormatted(),
+                    'gender'             => $p->gender,
+                    'gender_label'       => config('parivar.genders.' . $p->gender, $p->gender),
+                    'phone'              => $p->primaryPhone(),
+                    'native_place'       => $p->native_place,
+                    'current_address'    => $p->current_address,
+                    'is_gurukul_student' => (bool) $p->is_gurukul_student,
+                    'photo_url'          => $p->photoUrl(),
+                    'business_count'     => (int) $p->businesses_count,
+                    'gurukul_count'      => (int) $p->gurukul_records_count,
+                    'profile_score'      => $score['score'],
+                    'profile_level'      => $score['level'],
+                    'created'            => $p->created_at->format('d M Y'),
+                    'created_by_name'    => $p->createdBy?->name,
+                    'updated_by_name'    => $p->updatedBy?->name,
+                    'updated_at_fmt'     => $p->updated_at?->format('d M Y'),
+                ];
+            })
             ->values();
 
         return response()->json([
@@ -174,6 +186,89 @@ class ParivarController extends AdminController
                 }
             }
         });
+    }
+
+    public function show(int $id): JsonResponse
+    {
+        $payload = $this->memberDetailPayload($id);
+        $payload['success'] = true;
+
+        return response()->json($payload);
+    }
+
+    public function viewPage(int $id)
+    {
+        $payload = $this->memberDetailPayload($id);
+
+        return view('admin.parivar.view', [
+            'member'       => $payload['member'],
+            'businesses'   => $payload['businesses'],
+            'gurukul'      => $payload['gurukul'],
+            'relations'    => $payload['relations'],
+            'profileScore' => $payload['profile_score'],
+            'familyTree'   => $payload['family_tree'],
+            'duplicates'   => $payload['duplicates'],
+            'audits'       => $payload['audits'],
+            'editUrl'      => $payload['edit_url'],
+            'viewUrl'      => $payload['view_url'],
+        ]);
+    }
+
+    private function memberDetailPayload(int $id): array
+    {
+        $member = PersonalInfo::with([
+            'createdBy',
+            'updatedBy',
+            'businesses',
+            'gurukulRecords.branch',
+            'gurukulRecords.saints',
+            'personRelations.relation',
+            'personRelations.relatedPerson',
+        ])->findOrFail($id);
+
+        $personal = $member->toFormArray();
+        $personal['gender_label'] = config('parivar.genders.' . $member->gender, $member->gender);
+        $personal['marital_label'] = config('parivar.marital_statuses.' . $member->marital_status, $member->marital_status);
+        $personal['date_of_birth_fmt'] = $member->date_of_birth?->format('d M Y');
+        $personal['created'] = $member->created_at?->format('d M Y H:i');
+        $personal['updated'] = $member->updated_at?->format('d M Y H:i');
+        $personal['created_by_name'] = $member->createdBy?->name;
+        $personal['updated_by_name'] = $member->updatedBy?->name;
+        $personal['secondary_phone'] = $member->phone_2
+            ? trim(($member->c_code_2 ? $member->c_code_2 . ' ' : '') . $member->phone_2)
+            : null;
+
+        $score = ProfileScore::for($member);
+        $tree = FamilyTreeBuilder::for($member);
+        $duplicates = DuplicateDetector::for($member);
+        $audits = PersonalInfoAudit::query()
+            ->with('actor')
+            ->where('personal_info_id', $member->id)
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(80)
+            ->get()
+            ->map->toTimelineArray()
+            ->values();
+
+        return [
+            'member'     => $personal,
+            'businesses' => $member->businesses->map->toFormArray()->values(),
+            'gurukul'    => $member->gurukulRecords->map->toFormArray()->values(),
+            'relations'  => $member->personRelations
+                ->map(function (PersonRelation $rel) {
+                    $rel->loadMissing(['relation', 'relatedPerson', 'person']);
+
+                    return $rel->toFormArray();
+                })
+                ->values(),
+            'profile_score' => $score,
+            'family_tree'   => $tree,
+            'duplicates'    => $duplicates,
+            'audits'        => $audits,
+            'edit_url'      => url('/admin/parivar/' . $member->id . '/edit'),
+            'view_url'      => url('/admin/parivar/' . $member->id . '/view'),
+        ];
     }
 
     public function AddEditAction($id = null)
@@ -388,12 +483,14 @@ class ParivarController extends AdminController
         ]);
 
         $existingRelatedIds = [];
+        $rejectedPartnerIds = [];
         if ($exceptId) {
             $existingRelatedIds = PersonRelation::query()
                 ->where('personal_info_id', $exceptId)
                 ->pluck('related_personal_info_id')
                 ->map(fn ($id) => (int) $id)
                 ->all();
+            $rejectedPartnerIds = PersonRelationRejection::rejectedPartnerIds($exceptId);
         }
 
         $relationMap = Relation::active()
@@ -564,6 +661,7 @@ class ParivarController extends AdminController
             'grandparent' => 4, 'grandchild' => 5,
         ];
         $suggestions = $suggestions
+            ->reject(fn ($s) => in_array((int) $s['related_id'], $rejectedPartnerIds, true))
             ->sortBy(fn ($s) => ($priority[$s['type']] ?? 9) . '-' . $s['related_unique_id'])
             ->unique('related_id')
             ->values()
@@ -572,6 +670,41 @@ class ParivarController extends AdminController
         return response()->json([
             'success'      => true,
             'suggestions'  => $suggestions,
+        ]);
+    }
+
+    /**
+     * Permanently hide a name-pattern suggestion for both people.
+     */
+    public function rejectRelationSuggestion(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'personal_info_id'         => 'required|integer|exists:personal_info,id',
+            'related_personal_info_id' => 'required|integer|exists:personal_info,id|different:personal_info_id',
+            'note'                     => 'nullable|string|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        $data = $validator->validated();
+        $row = PersonRelationRejection::rejectPair(
+            (int) $data['personal_info_id'],
+            (int) $data['related_personal_info_id'],
+            $data['note'] ?? 'Not related (suggestion dismissed)'
+        );
+
+        if (! $row) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Could not save rejection.',
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Suggestion hidden for both people.',
         ]);
     }
 
@@ -595,6 +728,7 @@ class ParivarController extends AdminController
             'mirror_label'      => $mirrorLabel,
             'reason'            => $reason,
             'edit_url'          => url('/admin/parivar/' . $other->id . '/edit'),
+            'view_url'          => url('/admin/parivar/' . $other->id . '/view'),
         ];
     }
 
@@ -1175,6 +1309,155 @@ class ParivarController extends AdminController
                 'is_active'  => (bool) $row->is_active,
                 'label'      => $row->displayName(),
             ],
+        ]);
+    }
+
+    /**
+     * Excel-friendly CSV export (UTF-8 BOM). Respects list search filters.
+     */
+    public function ExportRecord(): StreamedResponse
+    {
+        if (! auth()->user()->can('parivar-export') && ! auth()->user()->can('parivar-list')) {
+            abort(403, 'You do not have permission to export Parivar data.');
+        }
+
+        $request = request();
+        $searchBy = (string) $request->input('search_by', 'name');
+        $searchRaw = trim((string) (
+            $request->input('search_value')
+            ?: data_get($request->input('search'), 'value', '')
+        ));
+
+        $allowedSearch = ['name', 'phone', 'address', 'aadhaar', 'unique_id', 'all'];
+        if (! in_array($searchBy, $allowedSearch, true)) {
+            $searchBy = 'name';
+        }
+
+        $query = PersonalInfo::query()
+            ->with([
+                'createdBy',
+                'updatedBy',
+                'businesses',
+                'gurukulRecords.branch',
+                'gurukulRecords.saints',
+                'personRelations.relation',
+                'personRelations.relatedPerson',
+            ]);
+
+        if ($searchRaw !== '') {
+            $this->applyMemberSearch($query, $searchBy, $searchRaw);
+        }
+
+        $query->orderBy('id');
+
+        $filename = 'parivar-members-' . now()->format('Y-m-d-His') . '.csv';
+
+        $headers = [
+            'Member ID',
+            'Display Name',
+            'Surname',
+            'Name',
+            'Father Name',
+            'Grandfather Name',
+            'Gujarati Surname',
+            'Gujarati Name',
+            'Gujarati Father',
+            'Gujarati Grandfather',
+            'Aadhaar',
+            'Date of Birth',
+            'Gender',
+            'Marital Status',
+            'Country Code 1',
+            'Phone 1',
+            'Country Code 2',
+            'Phone 2',
+            'Native Place',
+            'Current Address',
+            'Gurukul Student',
+            'Businesses',
+            'Gurukul Stays',
+            'Family Relations',
+            'Profile Score %',
+            'Created By',
+            'Created At',
+            'Updated By',
+            'Updated At',
+        ];
+
+        return response()->streamDownload(function () use ($query, $headers) {
+            $out = fopen('php://output', 'w');
+            // UTF-8 BOM so Excel shows Gujarati / special chars correctly.
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, $headers);
+
+            $query->chunkById(200, function ($rows) use ($out) {
+                foreach ($rows as $p) {
+                    /** @var PersonalInfo $p */
+                    $score = ProfileScore::for($p);
+                    $businesses = $p->businesses
+                        ->map(fn (BusinessInfo $b) => trim($b->business_name . ($b->business_address ? ' (' . $b->business_address . ')' : '')))
+                        ->filter()
+                        ->implode(' | ');
+
+                    $gurukul = $p->gurukulRecords->map(function (GurukulInfo $g) {
+                        $parts = array_filter([
+                            $g->branch?->branch_name,
+                            ($g->start_year || $g->end_year)
+                                ? trim(($g->start_year ?: '—') . ($g->end_year ? '–' . $g->end_year : ''))
+                                : null,
+                            $g->total_year ? $g->total_year . 'yr' : null,
+                            $g->saints->isNotEmpty()
+                                ? $g->saints->map->displayName()->implode(', ')
+                                : null,
+                        ]);
+
+                        return implode(' · ', $parts);
+                    })->filter()->implode(' | ');
+
+                    $relations = $p->personRelations->map(function (PersonRelation $r) {
+                        $r->loadMissing(['relation', 'relatedPerson', 'person']);
+
+                        return $r->sentenceLabel();
+                    })->filter()->implode(' | ');
+
+                    fputcsv($out, [
+                        $p->unique_id,
+                        $p->display_name ?: $p->englishFullName(),
+                        $p->en_last_name,
+                        $p->en_first_name,
+                        $p->en_middle_name,
+                        $p->en_grandfather_name,
+                        $p->gu_last_name,
+                        $p->gu_first_name,
+                        $p->gu_middle_name,
+                        $p->gu_grandfather_name,
+                        $p->aadhaarFormatted(),
+                        $p->date_of_birth?->format('Y-m-d'),
+                        config('parivar.genders.' . $p->gender, $p->gender),
+                        config('parivar.marital_statuses.' . $p->marital_status, $p->marital_status),
+                        $p->c_code_1,
+                        $p->phone_1,
+                        $p->c_code_2,
+                        $p->phone_2,
+                        $p->native_place,
+                        $p->current_address,
+                        $p->is_gurukul_student ? 'Yes' : 'No',
+                        $businesses,
+                        $gurukul,
+                        $relations,
+                        $score['score'],
+                        $p->createdBy?->name,
+                        $p->created_at?->format('Y-m-d H:i'),
+                        $p->updatedBy?->name,
+                        $p->updated_at?->format('Y-m-d H:i'),
+                    ]);
+                }
+            });
+
+            fclose($out);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 }
